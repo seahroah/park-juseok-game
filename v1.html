@@ -1,0 +1,1478 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>진짜같은 가짜팬 박주석은 못말려2</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a3d0a;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    overflow: hidden;
+    touch-action: none;
+    font-family: 'Segoe UI', sans-serif;
+  }
+  canvas { border-radius: 8px; box-shadow: 0 0 30px rgba(0,0,0,0.5); }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+const W = Math.min(window.innerWidth, 420);
+const H = Math.min(window.innerHeight, 720);
+canvas.width = W;
+canvas.height = H;
+
+// ========== 축구공 프리렌더 ==========
+// 절두이십면체 2D 투영: 검은 오각형 + 흰 육각형 + 이음선(seam)
+function createSoccerBallImage(size) {
+  const res = size * 6;
+  const c = document.createElement('canvas');
+  c.width = c.height = res;
+  const g = c.getContext('2d');
+  const midX = res / 2, midY = res / 2, R = res * 0.45;
+
+  const DEG = Math.PI / 180;
+  const armAng = [0,1,2,3,4].map(i => (-90 + i * 72) * DEG);
+  const hexAng = [0,1,2,3,4].map(i => (-54 + i * 72) * DEG);
+
+  function polar(r, a) { return [midX + R * r * Math.cos(a), midY + R * r * Math.sin(a)]; }
+
+  // 30개 꼭짓점
+  const v = [];
+  // Ring 0: 가운데 오각형 (0-4)
+  for (let i = 0; i < 5; i++) v.push(polar(0.30, armAng[i]));
+  // Ring 1: 바깥 분기점 (5-9)
+  for (let i = 0; i < 5; i++) v.push(polar(0.62, armAng[i]));
+  // Ring 2: 육각형 먼 꼭짓점 (10-19), 2개씩
+  for (let j = 0; j < 5; j++) {
+    v.push(polar(0.82, hexAng[j] - 18 * DEG));
+    v.push(polar(0.82, hexAng[j] + 18 * DEG));
+  }
+  // Ring 3: 바깥 오각형 먼 꼭짓점 (20-29), 2개씩
+  for (let i = 0; i < 5; i++) {
+    v.push(polar(0.99, armAng[i] - 30 * DEG));
+    v.push(polar(0.99, armAng[i] + 30 * DEG));
+  }
+
+  // 클리핑
+  g.save();
+  g.beginPath(); g.arc(midX, midY, R, 0, Math.PI * 2); g.clip();
+
+  // 구체 그라데이션 배경
+  const bg = g.createRadialGradient(midX - R * 0.25, midY - R * 0.28, R * 0.05, midX + R * 0.08, midY + R * 0.08, R);
+  bg.addColorStop(0, '#ffffff');
+  bg.addColorStop(0.45, '#f8f8f8');
+  bg.addColorStop(0.75, '#e4e4e4');
+  bg.addColorStop(1, '#ababab');
+  g.fillStyle = bg;
+  g.beginPath(); g.arc(midX, midY, R, 0, Math.PI * 2); g.fill();
+
+  const seamW = res * 0.02;
+  const seamCol = 'rgba(35,35,35,0.6)';
+
+  function drawFace(indices, fill) {
+    g.beginPath();
+    indices.forEach((vi, i) => {
+      if (i === 0) g.moveTo(v[vi][0], v[vi][1]);
+      else g.lineTo(v[vi][0], v[vi][1]);
+    });
+    g.closePath();
+    g.fillStyle = fill;
+    g.fill();
+    g.strokeStyle = seamCol;
+    g.lineWidth = seamW;
+    g.lineJoin = 'round';
+    g.stroke();
+  }
+
+  // 1) 흰색 육각형 5개 (배경 위에 그려서 seam만 보임)
+  for (let j = 0; j < 5; j++) {
+    const next = (j + 1) % 5;
+    drawFace([j, 5 + j, 10 + 2 * j, 10 + 2 * j + 1, 5 + next, next], '#f3f3f1');
+  }
+
+  // 2) 바깥 검은 오각형 5개
+  for (let i = 0; i < 5; i++) {
+    const prev = (i + 4) % 5;
+    drawFace([5 + i, 10 + 2 * i, 20 + 2 * i + 1, 20 + 2 * i, 10 + 2 * prev + 1], '#1a1a1a');
+  }
+
+  // 3) 가운데 검은 오각형
+  drawFace([0, 1, 2, 3, 4], '#111111');
+
+  // 4) 바깥 림 이음선 (부분적으로 보이는 육각형 테두리)
+  g.strokeStyle = seamCol;
+  g.lineWidth = seamW;
+  g.lineCap = 'round';
+  for (let i = 0; i < 5; i++) {
+    const a = 20 + 2 * i + 1;
+    const b = 20 + 2 * ((i + 1) % 5);
+    g.beginPath(); g.moveTo(v[a][0], v[a][1]); g.lineTo(v[b][0], v[b][1]); g.stroke();
+  }
+
+  g.restore();
+
+  // 하이라이트 (유광 반사)
+  const hl = g.createRadialGradient(midX - R * 0.32, midY - R * 0.35, 0, midX - R * 0.1, midY - R * 0.1, R * 0.55);
+  hl.addColorStop(0, 'rgba(255,255,255,0.6)');
+  hl.addColorStop(0.35, 'rgba(255,255,255,0.18)');
+  hl.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = hl;
+  g.beginPath(); g.arc(midX, midY, R, 0, Math.PI * 2); g.fill();
+
+  // 외곽선
+  g.strokeStyle = 'rgba(0,0,0,0.18)';
+  g.lineWidth = res * 0.012;
+  g.beginPath(); g.arc(midX, midY, R, 0, Math.PI * 2); g.stroke();
+
+  return c;
+}
+
+// 불공 이미지
+function createFireBallImage(size) {
+  const c = document.createElement('canvas');
+  c.width = c.height = size * 2.5;
+  const g = c.getContext('2d');
+  const cx = size * 1.25, cy = size * 1.25, r = size * 0.9;
+  const glow = g.createRadialGradient(cx, cy, r * 0.3, cx, cy, r * 1.4);
+  glow.addColorStop(0, 'rgba(255,200,50,0.6)');
+  glow.addColorStop(0.5, 'rgba(255,80,0,0.3)');
+  glow.addColorStop(1, 'rgba(255,0,0,0)');
+  g.fillStyle = glow;
+  g.beginPath(); g.arc(cx, cy, r * 1.4, 0, Math.PI * 2); g.fill();
+  const bg = g.createRadialGradient(cx - r * 0.2, cy - r * 0.2, 0, cx, cy, r);
+  bg.addColorStop(0, '#ffdd44');
+  bg.addColorStop(0.4, '#ff6600');
+  bg.addColorStop(1, '#cc2200');
+  g.fillStyle = bg;
+  g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2); g.fill();
+  g.fillStyle = 'rgba(255,255,200,0.4)';
+  g.beginPath(); g.arc(cx - r * 0.2, cy - r * 0.2, r * 0.4, 0, Math.PI * 2); g.fill();
+  return c;
+}
+
+// 프리렌더
+const ballImages = {};
+const fireBallImages = {};
+[10, 12, 14, 16].forEach(s => {
+  ballImages[s] = createSoccerBallImage(s);
+  fireBallImages[s] = createFireBallImage(s);
+});
+
+// ========== 축구장 배경 ==========
+const fieldBg = document.createElement('canvas');
+fieldBg.width = W; fieldBg.height = H;
+(function drawField() {
+  const g = fieldBg.getContext('2d');
+  const grass = g.createLinearGradient(0, 0, 0, H);
+  grass.addColorStop(0, '#2d8c3c');
+  grass.addColorStop(1, '#1f6b2c');
+  g.fillStyle = grass;
+  g.fillRect(0, 0, W, H);
+  for (let i = 0; i < H; i += 40) {
+    g.fillStyle = i % 80 === 0 ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)';
+    g.fillRect(0, i, W, 40);
+  }
+  for (let i = 0; i < 500; i++) {
+    g.fillStyle = `rgba(${Math.random() > 0.5 ? '255,255,255' : '0,50,0'},0.02)`;
+    g.fillRect(Math.random() * W, Math.random() * H, 2, 2);
+  }
+  g.strokeStyle = 'rgba(255,255,255,0.35)';
+  g.lineWidth = 2;
+  const m = 20;
+  g.strokeRect(m, m, W - m * 2, H - m * 2);
+  g.beginPath(); g.moveTo(m, H / 2); g.lineTo(W - m, H / 2); g.stroke();
+  g.beginPath(); g.arc(W / 2, H / 2, 55, 0, Math.PI * 2); g.stroke();
+  g.fillStyle = 'rgba(255,255,255,0.4)';
+  g.beginPath(); g.arc(W / 2, H / 2, 3, 0, Math.PI * 2); g.fill();
+  const penW = 140, penH = 60, goalW = 70, goalH = 25;
+  g.strokeRect((W - penW) / 2, m, penW, penH);
+  g.strokeRect((W - goalW) / 2, m, goalW, goalH);
+  g.fillStyle = 'rgba(255,255,255,0.35)';
+  g.beginPath(); g.arc(W / 2, m + penH - 10, 2.5, 0, Math.PI * 2); g.fill();
+  g.beginPath(); g.arc(W / 2, m + penH - 10, 22, 0.3 * Math.PI, 0.7 * Math.PI); g.stroke();
+  g.strokeRect((W - penW) / 2, H - m - penH, penW, penH);
+  g.strokeRect((W - goalW) / 2, H - m - goalH, goalW, goalH);
+  g.fillStyle = 'rgba(255,255,255,0.35)';
+  g.beginPath(); g.arc(W / 2, H - m - penH + 10, 2.5, 0, Math.PI * 2); g.fill();
+  g.beginPath(); g.arc(W / 2, H - m - penH + 10, 22, 1.3 * Math.PI, 1.7 * Math.PI); g.stroke();
+  [[m, m, 0, 0.5], [W - m, m, 0.5, 1], [m, H - m, 1.5, 2], [W - m, H - m, 1, 1.5]].forEach(([cx, cy, a1, a2]) => {
+    g.beginPath(); g.arc(cx, cy, 10, a1 * Math.PI, a2 * Math.PI); g.stroke();
+  });
+})();
+
+// ========== K리그2 데이터 ==========
+const kleague2Teams = [
+  '충북청주FC', '충남아산', '천안시티FC', '경남FC', '김포FC',
+  '안산그리너스', '수원삼성', '성남FC', '화성FC',
+  '서울이랜드', '부천FC', '전남드래곤즈',
+];
+const busanPlayers = [
+  '장호익', '임민혁', '조위제', '이동수', '김민혁',
+  '이승기', '정호근', '김민기', '전성진', '박대한',
+  '김동욱', '손석용', '홍재석', '손휘', '백가온',
+];
+
+// ========== 게임 상태 ==========
+let state = 'ready'; // ready, playing, matchEnd, ending, over
+let score = 0;
+let totalScore = 0; // 전체 누적 점수
+let highScore = parseInt(localStorage.getItem('ballDodgeHigh5') || '0');
+let time = 0;
+let difficulty = 1;
+let combo = 0;
+let screenShakeX = 0, screenShakeY = 0;
+let dangerZone = null, dangerTimer = 0;
+let itemActive = null, itemTimer = 0;
+
+// 다시시작 버튼 영역
+const restartBtn = { x: W / 2 - 70, y: 0, w: 140, h: 44 };
+
+// 전광판 / 경기 시스템
+let matchIndex = 0;
+let matchOpponent = '';
+let busanGoals = 0;
+let opponentGoals = 0;
+let lastGoalScore = 0;     // 마지막 골 시 score
+let matchWins = 0;
+let matchSchedule = [];     // 셔플된 상대팀 목록
+let boardMessage = '';      // 전광판 메시지
+let boardTimer = 0;
+let goalScorers = [];       // 이번 경기 골 넣은 선수들
+
+function shuffleTeams() {
+  matchSchedule = [...kleague2Teams].sort(() => Math.random() - 0.5);
+}
+
+function startMatch() {
+  matchOpponent = matchSchedule[matchIndex % matchSchedule.length];
+  busanGoals = 0;
+  opponentGoals = Math.floor(Math.random() * 2); // 상대 0~1골
+  lastGoalScore = score;
+  goalScorers = [];
+  boardMessage = `부산 vs ${matchOpponent}`;
+  boardTimer = 180;
+}
+
+const player = {
+  x: W / 2, y: H - 70,
+  vx: 0, ax: 0,
+  friction: 0.96,
+  accel: 0.55,
+  maxSpeed: 8,
+  frame: 0, frameTimer: 0,
+  direction: 1, invincible: 0,
+};
+
+let balls = [];
+let particles = [];
+let items = [];
+let floatingTexts = [];
+let inputLeft = false, inputRight = false;
+
+// 앞뒤 전환 (벽 부딪히면 전환)
+let facingBack = false;
+
+// 말풍선 시스템
+const speeches = [
+  '오~최강부산!', '자! 출발!', '배댈 꺼져!',
+  '배댈은 가짜팬', '박주석이 최고야!',
+  '사나이 자존심\n부산에 걸었다!', '아이파크 화이팅!',
+  '부산은 하나다!', '오늘도 승리다!',
+  '배댈 망해라~', '진짜팬은 나야!',
+  '아 미끄러워!!', '공 너무 많아ㅠ',
+  '나 박주석이다!', 'HDC 최고!',
+  '부산 갈매기~♪', '경기장 가고싶다!',
+];
+let speechBubble = { text: '', timer: 0, x: 0, y: 0 };
+let lastSpeechTime = 0;
+
+// 경기종료 / 엔딩 전환 타이머
+let transitionTimer = 0;
+
+// ========== 입력 ==========
+function getCanvasPos(clientX, clientY) {
+  const rect = canvas.getBoundingClientRect();
+  return { x: clientX - rect.left, y: clientY - rect.top };
+}
+
+function isRestartBtnHit(cx, cy) {
+  return cx >= restartBtn.x && cx <= restartBtn.x + restartBtn.w &&
+         cy >= restartBtn.y && cy <= restartBtn.y + restartBtn.h;
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowLeft' || e.key === 'a') inputLeft = true;
+  if (e.key === 'ArrowRight' || e.key === 'd') inputRight = true;
+  if (state === 'ready') startGame();
+  if ((state === 'over' || state === 'ending') && (e.key === 'Enter' || e.key === ' ')) startGame();
+});
+document.addEventListener('keyup', e => {
+  if (e.key === 'ArrowLeft' || e.key === 'a') inputLeft = false;
+  if (e.key === 'ArrowRight' || e.key === 'd') inputRight = false;
+});
+
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  const pos = getCanvasPos(e.touches[0].clientX, e.touches[0].clientY);
+  if (state === 'ready') { startGame(); return; }
+  if (state === 'over' || state === 'ending') {
+    if (isRestartBtnHit(pos.x, pos.y)) startGame();
+    return;
+  }
+  if (pos.x < W / 2) inputLeft = true; else inputRight = true;
+});
+canvas.addEventListener('touchend', e => { e.preventDefault(); inputLeft = false; inputRight = false; });
+
+canvas.addEventListener('mousedown', e => {
+  const pos = getCanvasPos(e.clientX, e.clientY);
+  if (state === 'ready') { startGame(); return; }
+  if (state === 'over' || state === 'ending') {
+    if (isRestartBtnHit(pos.x, pos.y)) startGame();
+    return;
+  }
+  if (pos.x < W / 2) inputLeft = true; else inputRight = true;
+});
+canvas.addEventListener('mouseup', () => { inputLeft = false; inputRight = false; });
+
+// ========== 게임 시작 ==========
+function startGame() {
+  state = 'playing';
+  score = 0; totalScore = 0; time = 0; difficulty = 1; combo = 0;
+  balls = []; particles = []; items = []; floatingTexts = [];
+  dangerZone = null; dangerTimer = 0;
+  itemActive = null; itemTimer = 0;
+  player.x = W / 2; player.vx = 0; player.ax = 0;
+  player.frame = 0; player.invincible = 0;
+  facingBack = false;
+  speechBubble.timer = 0;
+  lastSpeechTime = 0;
+  matchIndex = 0; matchWins = 0;
+  transitionTimer = 0;
+  shuffleTeams();
+  startMatch();
+}
+
+// 경기종료 후 다음 경기로
+function nextMatch() {
+  matchIndex++;
+  state = 'playing';
+  // 난이도/공 유지, 경기만 새로
+  startMatch();
+  transitionTimer = 0;
+}
+
+// ========== 스폰 ==========
+function spawnBall(x, speed) {
+  const sizes = [10, 12, 14, 16];
+  const r = sizes[Math.floor(Math.random() * sizes.length)];
+  balls.push({
+    x: x ?? Math.random() * (W - 40) + 20,
+    y: -r * 2, r,
+    vy: speed ?? (3.5 + Math.random() * 2 + difficulty * 0.5),
+    vx: difficulty > 3 ? (Math.random() - 0.5) * 2 : 0,
+    rotation: 0, rotSpeed: (Math.random() - 0.5) * 0.15,
+    type: 'normal',
+  });
+}
+
+function spawnFireBall() {
+  const sizes = [10, 12];
+  const r = sizes[Math.floor(Math.random() * sizes.length)];
+  balls.push({
+    x: Math.random() * (W - 30) + 15,
+    y: -r * 2, r,
+    vy: 6 + Math.random() * 3 + difficulty * 0.3,
+    vx: 0, rotation: 0, rotSpeed: (Math.random() - 0.5) * 0.3,
+    type: 'fire',
+  });
+}
+
+function spawnItem() {
+  const types = ['slow', 'shield', 'magnet'];
+  items.push({
+    x: Math.random() * (W - 40) + 20, y: -20, vy: 2,
+    type: types[Math.floor(Math.random() * types.length)],
+    size: 14, pulse: 0,
+  });
+}
+
+function addParticles(x, y, color, count) {
+  for (let i = 0; i < count; i++) {
+    particles.push({
+      x, y, vx: (Math.random() - 0.5) * 8, vy: (Math.random() - 0.5) * 8,
+      life: 25 + Math.random() * 20, maxLife: 45,
+      color, size: 2 + Math.random() * 3,
+    });
+  }
+}
+
+function addFloatingText(x, y, text, color) {
+  floatingTexts.push({ x, y, text, color, life: 60, vy: -2 });
+}
+
+function shake(amount) {
+  screenShakeX = (Math.random() - 0.5) * amount;
+  screenShakeY = (Math.random() - 0.5) * amount;
+}
+
+// ========== 그리기 ==========
+// 말풍선 트리거 (벽 충돌 시 또는 랜덤)
+function triggerSpeech() {
+  const text = speeches[Math.floor(Math.random() * speeches.length)];
+  speechBubble = { text, timer: 120, x: player.x, y: player.y - 55 };
+  lastSpeechTime = time;
+}
+
+// 말풍선 그리기
+function drawSpeechBubble() {
+  if (speechBubble.timer <= 0) return;
+  const alpha = Math.min(1, speechBubble.timer / 20);
+  const bx = player.x;
+  const by = player.y - 58 - Math.sin(time * 0.08) * 3;
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+
+  // 말풍선 텍스트 측정
+  ctx.font = 'bold 11px sans-serif';
+  ctx.textAlign = 'center';
+  const lines = speechBubble.text.split('\n');
+  const lineH = 14;
+  const maxW = Math.max(...lines.map(l => ctx.measureText(l).width));
+  const bubbleW = maxW + 18;
+  const bubbleH = lines.length * lineH + 10;
+  const bLeft = bx - bubbleW / 2;
+  const bTop = by - bubbleH;
+
+  // 말풍선 배경
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.roundRect(bLeft, bTop, bubbleW, bubbleH, 8);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.roundRect(bLeft, bTop, bubbleW, bubbleH, 8);
+  ctx.stroke();
+
+  // 꼬리 (삼각형)
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.moveTo(bx - 5, bTop + bubbleH);
+  ctx.lineTo(bx, bTop + bubbleH + 7);
+  ctx.lineTo(bx + 5, bTop + bubbleH);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(bx - 5, bTop + bubbleH);
+  ctx.lineTo(bx, bTop + bubbleH + 7);
+  ctx.lineTo(bx + 5, bTop + bubbleH);
+  ctx.stroke();
+  // 꼬리 연결부 하얀 덮개
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(bx - 6, bTop + bubbleH - 2, 12, 3);
+
+  // 텍스트
+  ctx.fillStyle = '#222';
+  ctx.font = 'bold 11px sans-serif';
+  ctx.textAlign = 'center';
+  lines.forEach((line, i) => {
+    ctx.fillText(line, bx, bTop + 14 + i * lineH);
+  });
+
+  ctx.restore();
+}
+
+function drawPlayer() {
+  const p = player;
+  if (p.invincible > 0 && Math.floor(time / 3) % 2 === 0) return;
+
+  const speed = Math.abs(p.vx);
+  const bounce = Math.sin(p.frame * 0.35) * (3 + speed * 0.6);
+  const armSwing = Math.sin(p.frame * 0.35) * (18 + speed * 4);
+  const legSwing = Math.sin(p.frame * 0.35) * (12 + speed * 2.5);
+  const bodyTilt = p.vx * 3.5;
+  const px = p.x, py = p.y + bounce;
+
+  ctx.save();
+  ctx.translate(px, py);
+  ctx.rotate(bodyTilt * Math.PI / 180);
+
+  // 그림자
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  ctx.beginPath(); ctx.ellipse(0, 30, 14, 4, 0, 0, Math.PI * 2); ctx.fill();
+
+  function nearBallCheck() {
+    return balls.some(b => Math.abs(b.x - px) < 30 && b.y > py - 80 && b.y < py);
+  }
+  const nearBall = nearBallCheck();
+
+  // === 다리 (검은 바지 + 운동화) ===
+  [[-5, 1], [5, -1]].forEach(([tx, dir]) => {
+    ctx.save();
+    ctx.translate(tx, 14);
+    ctx.rotate(legSwing * dir * Math.PI / 180);
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(-2.5, 0, 5, 17);
+    ctx.fillStyle = '#e74c3c';
+    ctx.fillRect(-3.5, 15, 7, 4);
+    ctx.fillStyle = '#aaa';
+    ctx.fillRect(-3.5, 15, 3, 4);
+    ctx.restore();
+  });
+
+  const jerseyW = 18, jerseyH = 24;
+
+  if (facingBack) {
+    // ============================
+    //    뒷모습 (백넘버 18, 백가온)
+    // ============================
+
+    // 몸통 (빨간색 등판)
+    if (p.invincible > 0) {
+      ctx.fillStyle = '#f39c12';
+    } else {
+      ctx.fillStyle = '#d42a2a';
+    }
+    ctx.beginPath(); ctx.roundRect(-jerseyW/2, -10, jerseyW, jerseyH, 3); ctx.fill();
+
+    if (p.invincible <= 0) {
+      // 어깨 줄무늬 (아디다스풍 3선)
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(-jerseyW/2, -10, jerseyW, 2);
+
+      // 백넘버 "18"
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 14px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('18', 0, 6);
+
+      // 이름 "백가온"
+      ctx.font = 'bold 5px sans-serif';
+      ctx.fillText('백가온', 0, -3);
+
+      // IPARK (하단)
+      ctx.font = 'bold 4px sans-serif';
+      ctx.fillStyle = '#fff';
+      ctx.fillText('IPARK', 0, 13);
+    }
+
+    // 소매
+    const sleeveCol = p.invincible > 0 ? '#e67e22' : '#d42a2a';
+
+    // 왼팔
+    ctx.save();
+    ctx.translate(-jerseyW/2 - 1, -6);
+    ctx.rotate(-armSwing * Math.PI / 180);
+    ctx.fillStyle = sleeveCol;
+    ctx.fillRect(-2.5, 0, 5, 5);
+    ctx.fillStyle = '#f5cba7';
+    ctx.fillRect(-2, 5, 4, 10);
+    ctx.beginPath(); ctx.arc(0, 17, 3, 0, Math.PI * 2); ctx.fill();
+    // 머플러 펄럭
+    ctx.fillStyle = '#e74c3c';
+    const mufAngle = Math.sin(p.frame * 0.25) * 0.4;
+    ctx.save(); ctx.rotate(mufAngle);
+    ctx.fillRect(-6, 13, 12, 2.5);
+    ctx.fillRect(-7, 11, 2, 7);
+    ctx.fillRect(5, 11, 2, 7);
+    ctx.restore();
+    ctx.restore();
+
+    // 오른팔
+    ctx.save();
+    ctx.translate(jerseyW/2 + 1, -6);
+    ctx.rotate(armSwing * Math.PI / 180);
+    ctx.fillStyle = sleeveCol;
+    ctx.fillRect(-2.5, 0, 5, 5);
+    ctx.fillStyle = '#f5cba7';
+    ctx.fillRect(-2, 5, 4, 10);
+    ctx.beginPath(); ctx.arc(0, 17, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+
+    // 머리 (뒷모습)
+    const headR = 14;
+    ctx.fillStyle = '#f5cba7';
+    ctx.beginPath(); ctx.arc(0, -22, headR, 0, Math.PI * 2); ctx.fill();
+
+    // 뒷머리 (더 많이 보이게)
+    ctx.fillStyle = '#1a1a1a';
+    ctx.beginPath(); ctx.arc(0, -24, 13.5, 0, Math.PI * 2); ctx.fill();
+    // 목
+    ctx.fillStyle = '#f5cba7';
+    ctx.fillRect(-3, -10, 6, 4);
+
+    // 귀 (양쪽)
+    ctx.fillStyle = '#f0b898';
+    ctx.beginPath(); ctx.ellipse(-13, -20, 3, 4, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(13, -20, 3, 4, 0, 0, Math.PI * 2); ctx.fill();
+
+    // 안경다리 (뒤에서 보이는)
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(-13, -22); ctx.lineTo(-8, -22); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(13, -22); ctx.lineTo(8, -22); ctx.stroke();
+
+  } else {
+    // ============================
+    //    앞모습
+    // ============================
+
+    // 몸통 (부산 아이파크: 빨강+흰 세로 스플릿)
+    if (p.invincible > 0) {
+      ctx.fillStyle = '#f39c12';
+      ctx.beginPath(); ctx.roundRect(-jerseyW/2, -10, jerseyW, jerseyH, 3); ctx.fill();
+    } else {
+      // 왼쪽 빨강
+      ctx.fillStyle = '#d42a2a';
+      ctx.beginPath(); ctx.roundRect(-jerseyW/2, -10, jerseyW/2, jerseyH, [3, 0, 0, 3]); ctx.fill();
+      // 오른쪽 흰
+      ctx.fillStyle = '#f5f5f5';
+      ctx.beginPath(); ctx.roundRect(0, -10, jerseyW/2, jerseyH, [0, 3, 3, 0]); ctx.fill();
+      // 가운데선
+      ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+      ctx.lineWidth = 0.5;
+      ctx.beginPath(); ctx.moveTo(0, -10); ctx.lineTo(0, 14); ctx.stroke();
+      // HDC
+      ctx.fillStyle = '#333';
+      ctx.font = 'bold 6px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('HDC', 0, 4);
+      // 엠블럼
+      ctx.fillStyle = '#d42a2a';
+      ctx.fillRect(-2, -8, 4, 4);
+      ctx.fillStyle = '#fff';
+      ctx.font = '3px sans-serif';
+      ctx.fillText('i', 0, -5);
+    }
+
+    const sleeveL = p.invincible > 0 ? '#e67e22' : '#d42a2a';
+    const sleeveR = p.invincible > 0 ? '#e67e22' : '#f5f5f5';
+
+    // 왼팔
+    ctx.save();
+    ctx.translate(-jerseyW/2 - 1, -6);
+    ctx.rotate(-armSwing * Math.PI / 180);
+    ctx.fillStyle = sleeveL;
+    ctx.fillRect(-2.5, 0, 5, 5);
+    ctx.fillStyle = '#f5cba7';
+    ctx.fillRect(-2, 5, 4, 10);
+    ctx.beginPath(); ctx.arc(0, 17, 3, 0, Math.PI * 2); ctx.fill();
+    // 머플러
+    if (!nearBall) {
+      ctx.fillStyle = '#e74c3c';
+      ctx.fillRect(-5, 14, 10, 2);
+      ctx.fillRect(-6, 12, 2, 6);
+      ctx.fillRect(4, 12, 2, 6);
+    }
+    ctx.restore();
+
+    // 오른팔
+    ctx.save();
+    ctx.translate(jerseyW/2 + 1, -6);
+    ctx.rotate(armSwing * Math.PI / 180);
+    ctx.fillStyle = sleeveR;
+    ctx.fillRect(-2.5, 0, 5, 5);
+    ctx.fillStyle = '#f5cba7';
+    ctx.fillRect(-2, 5, 4, 10);
+    ctx.beginPath(); ctx.arc(0, 17, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#eab892';
+    ctx.fillRect(-2, 15, 4, 3);
+    ctx.restore();
+
+    // 머리
+    const headR = 14;
+    ctx.fillStyle = '#f5cba7';
+    ctx.beginPath(); ctx.arc(0, -22, headR, 0, Math.PI * 2); ctx.fill();
+
+    // 머리카락
+    ctx.fillStyle = '#1a1a1a';
+    ctx.beginPath(); ctx.arc(0, -28, 13, Math.PI * 0.85, Math.PI * 2.15); ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(-10, -28);
+    ctx.quadraticCurveTo(-8, -20, -3, -22);
+    ctx.quadraticCurveTo(0, -19, 3, -22);
+    ctx.quadraticCurveTo(6, -20, 9, -27);
+    ctx.lineTo(10, -30);
+    ctx.arc(0, -28, 13, -0.15 * Math.PI, -0.85 * Math.PI, true);
+    ctx.fill();
+
+    // 안경
+    const eyeOff = p.direction * 1.5;
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 1.8;
+    ctx.beginPath(); ctx.ellipse(-5 + eyeOff, -22, 5.5, 4.5, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(5 + eyeOff, -22, 5.5, 4.5, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-0.5 + eyeOff, -22); ctx.lineTo(0.5 + eyeOff, -22); ctx.stroke();
+    ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(-10.5 + eyeOff, -22); ctx.lineTo(-14, -21); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(10.5 + eyeOff, -22); ctx.lineTo(14, -21); ctx.stroke();
+    ctx.fillStyle = 'rgba(200,220,255,0.15)';
+    ctx.beginPath(); ctx.ellipse(-5 + eyeOff, -22, 5, 4, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(5 + eyeOff, -22, 5, 4, 0, 0, Math.PI * 2); ctx.fill();
+
+    // 눈
+    const eyeR = nearBall ? 3 : 2;
+    ctx.fillStyle = '#1a1a1a';
+    ctx.beginPath();
+    ctx.arc(-5 + eyeOff, -21.5, eyeR, 0, Math.PI * 2);
+    ctx.arc(5 + eyeOff, -21.5, eyeR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(-4 + eyeOff, -22.5, 0.8, 0, Math.PI * 2);
+    ctx.arc(6 + eyeOff, -22.5, 0.8, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 놀람 이펙트
+    if (nearBall) {
+      ctx.strokeStyle = '#333';
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.moveTo(-3 + eyeOff, -28); ctx.lineTo(-1 + eyeOff, -30);
+      ctx.moveTo(3 + eyeOff, -28); ctx.lineTo(1 + eyeOff, -30);
+      ctx.stroke();
+    }
+
+    // 코
+    ctx.fillStyle = '#e8b090';
+    ctx.beginPath(); ctx.arc(eyeOff * 0.5, -17, 1.5, 0, Math.PI * 2); ctx.fill();
+
+    // 입
+    ctx.strokeStyle = '#c0392b'; ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    if (nearBall) {
+      ctx.arc(eyeOff * 0.3, -13, 3.5, 0, Math.PI * 2);
+    } else if (speed > 4) {
+      ctx.arc(eyeOff * 0.3, -13, 4, 0.05 * Math.PI, 0.95 * Math.PI);
+      ctx.fillStyle = '#c0392b'; ctx.fill();
+      ctx.fillStyle = '#e57373';
+      ctx.beginPath(); ctx.arc(eyeOff * 0.3 + 1, -11, 2, 0, Math.PI); ctx.fill();
+    } else if (Math.sin(p.frame * 0.2) > 0) {
+      ctx.arc(eyeOff * 0.3, -13, 4, 0.1 * Math.PI, 0.9 * Math.PI);
+    } else {
+      ctx.moveTo(-3 + eyeOff * 0.3, -13);
+      ctx.lineTo(3 + eyeOff * 0.3, -14);
+      ctx.lineTo(1 + eyeOff * 0.3, -12);
+    }
+    ctx.stroke();
+
+    // 홍조
+    ctx.fillStyle = 'rgba(255,130,130,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(-9, -16, 3, 2, 0, 0, Math.PI * 2);
+    ctx.ellipse(9, -16, 3, 2, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 땀
+    if (nearBall) {
+      ctx.fillStyle = 'rgba(100,180,255,0.7)';
+      ctx.beginPath(); ctx.ellipse(p.direction > 0 ? -12 : 12, -20, 1.5, 3, 0.3, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(p.direction > 0 ? -14 : 14, -16, 1, 2, 0.1, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  ctx.restore();
+
+  // 미끄러짐 먼지
+  if (speed > 2) {
+    const dustCount = speed > 5 ? 2 : 1;
+    for (let i = 0; i < dustCount; i++) {
+      addParticles(px + (Math.random() - 0.5) * 10, p.y + 28, 'rgba(180,220,180,0.5)', 1);
+    }
+  }
+}
+
+function drawBallSprite(b) {
+  const img = b.type === 'fire' ? fireBallImages[b.r] : ballImages[b.r];
+  if (!img) return;
+  ctx.save();
+  ctx.translate(b.x, b.y);
+  ctx.rotate(b.rotation);
+  const s = b.type === 'fire' ? b.r * 2.5 : b.r * 2;
+  ctx.drawImage(img, -s / 2, -s / 2, s, s);
+  ctx.restore();
+
+  if (b.y < H - 50) {
+    const dist = (H - 50 - b.y) / H;
+    const alpha = Math.max(0, 0.2 - dist * 0.3);
+    const shadowSize = b.r * (0.5 + (1 - dist) * 0.5);
+    ctx.fillStyle = `rgba(0,0,0,${alpha})`;
+    ctx.beginPath();
+    ctx.ellipse(b.x, H - 42, shadowSize, 3, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawItem(item) {
+  item.pulse += 0.08;
+  const s = item.size + Math.sin(item.pulse) * 3;
+  ctx.save();
+  ctx.translate(item.x, item.y);
+  const colors = { slow: '100,150,255', shield: '255,200,0', magnet: '255,100,255' };
+  const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, s * 2);
+  glow.addColorStop(0, `rgba(${colors[item.type]},0.35)`);
+  glow.addColorStop(1, `rgba(${colors[item.type]},0)`);
+  ctx.fillStyle = glow;
+  ctx.beginPath(); ctx.arc(0, 0, s * 2, 0, Math.PI * 2); ctx.fill();
+  const base = { slow: '#4488ff', shield: '#f1c40f', magnet: '#e056a0' };
+  ctx.fillStyle = base[item.type];
+  ctx.beginPath(); ctx.arc(0, 0, s, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(0, 0, s, 0, Math.PI * 2); ctx.stroke();
+  ctx.fillStyle = '#fff';
+  ctx.font = `bold ${s}px sans-serif`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const icons = { slow: '⏱', shield: '🛡', magnet: '⚡' };
+  ctx.fillText(icons[item.type], 0, 1);
+  ctx.restore();
+}
+
+function drawDangerZone() {
+  if (!dangerZone) return;
+  const alpha = Math.sin(time * 0.2) * 0.3 + 0.3;
+  ctx.fillStyle = `rgba(255,30,30,${alpha * 0.12})`;
+  ctx.fillRect(dangerZone.x, 0, dangerZone.w, H);
+  ctx.strokeStyle = `rgba(255,50,50,${alpha * 0.7})`;
+  ctx.lineWidth = 2;
+  ctx.setLineDash([6, 4]);
+  ctx.strokeRect(dangerZone.x, 0, dangerZone.w, H);
+  ctx.setLineDash([]);
+  ctx.fillStyle = `rgba(255,80,80,${alpha})`;
+  ctx.font = 'bold 13px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('⚠ DANGER', dangerZone.x + dangerZone.w / 2, 40);
+}
+
+// 전광판 그리기
+function drawScoreboard() {
+  const sbY = 62;
+  const sbH = 38;
+
+  // 전광판 배경 (LED 느낌)
+  ctx.fillStyle = 'rgba(0,0,0,0.75)';
+  ctx.beginPath(); ctx.roundRect(10, sbY, W - 20, sbH, 4); ctx.fill();
+  // 테두리 (LED 프레임)
+  ctx.strokeStyle = 'rgba(255,200,0,0.3)';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.roundRect(10, sbY, W - 20, sbH, 4); ctx.stroke();
+
+  // 왼쪽: 부산 아이파크
+  ctx.fillStyle = '#e74c3c';
+  ctx.font = 'bold 11px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText('부산', 20, sbY + 16);
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 18px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(`${busanGoals}`, W / 2 - 18, sbY + 18);
+
+  // 중앙 VS / 하이픈
+  ctx.fillStyle = '#f1c40f';
+  ctx.font = 'bold 12px sans-serif';
+  ctx.fillText('-', W / 2, sbY + 18);
+
+  // 오른쪽: 상대팀
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 18px sans-serif';
+  ctx.fillText(`${opponentGoals}`, W / 2 + 18, sbY + 18);
+  ctx.fillStyle = '#88bbff';
+  ctx.font = 'bold 11px sans-serif';
+  ctx.textAlign = 'right';
+  const oppShort = matchOpponent.length > 5 ? matchOpponent.substring(0, 5) : matchOpponent;
+  ctx.fillText(oppShort, W - 20, sbY + 16);
+
+  // 하단: 경기번호 + 승점
+  ctx.fillStyle = '#aaa';
+  ctx.font = '9px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText(`${matchIndex + 1}경기`, 20, sbY + 32);
+  ctx.textAlign = 'right';
+  ctx.fillText(`승점 ${matchWins * 3}`, W - 20, sbY + 32);
+
+  // 전광판 메시지 (골, 경기시작 등)
+  if (boardTimer > 0) {
+    const msgAlpha = Math.min(1, boardTimer / 30);
+    ctx.globalAlpha = msgAlpha;
+    ctx.fillStyle = 'rgba(0,0,0,0.85)';
+    ctx.beginPath(); ctx.roundRect(20, sbY + sbH + 4, W - 40, 28, 6); ctx.fill();
+
+    const flash = Math.sin(time * 0.15) > 0;
+    ctx.fillStyle = flash ? '#f1c40f' : '#fff';
+    ctx.font = 'bold 12px sans-serif';
+    ctx.textAlign = 'center';
+    // 줄바꿈 처리
+    const msgLines = boardMessage.split('\n');
+    if (msgLines.length === 1) {
+      ctx.fillText(boardMessage, W / 2, sbY + sbH + 22);
+    } else {
+      ctx.font = 'bold 10px sans-serif';
+      msgLines.forEach((line, i) => {
+        ctx.fillText(line, W / 2, sbY + sbH + 14 + i * 13);
+      });
+    }
+    ctx.globalAlpha = 1;
+  }
+}
+
+function drawUI() {
+  // 전광판
+  drawScoreboard();
+
+  // 점수
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.beginPath(); ctx.roundRect(8, 8, 100, 48, 8); ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 22px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText(`${score}`, 18, 34);
+  ctx.font = '10px sans-serif';
+  ctx.fillStyle = '#ccc';
+  ctx.fillText(`BEST ${highScore}`, 18, 48);
+
+  if (combo >= 5) {
+    ctx.fillStyle = combo >= 20 ? '#ff3333' : combo >= 10 ? '#ff9900' : '#f1c40f';
+    ctx.font = `bold ${13 + Math.min(combo, 30) * 0.3}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText(`${combo} COMBO`, W / 2, 74 + Math.sin(time * 0.1) * 2);
+  }
+
+  const level = Math.min(Math.floor(difficulty), 15);
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.beginPath(); ctx.roundRect(W - 62, 8, 54, 28, 8); ctx.fill();
+  ctx.fillStyle = level >= 8 ? '#ff4444' : level >= 5 ? '#ff8855' : '#ffcc44';
+  ctx.font = 'bold 13px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(`LV.${level}`, W - 35, 28);
+
+  const speedRatio = Math.abs(player.vx) / player.maxSpeed;
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.beginPath(); ctx.roundRect(W - 68, 42, 60, 6, 3); ctx.fill();
+  ctx.fillStyle = speedRatio > 0.7 ? '#e74c3c' : '#3498db';
+  ctx.beginPath(); ctx.roundRect(W - 68, 42, 60 * speedRatio, 6, 3); ctx.fill();
+
+  if (itemActive) {
+    const remain = Math.ceil(itemTimer / 60);
+    const labels = { slow: '⏱ SLOW', shield: '🛡 SHIELD', magnet: '⚡ SPEED UP' };
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.beginPath(); ctx.roundRect(W / 2 - 55, 4, 110, 22, 6); ctx.fill();
+    ctx.fillStyle = '#f1c40f';
+    ctx.font = 'bold 12px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${labels[itemActive]} ${remain}s`, W / 2, 19);
+  }
+
+  for (const ft of floatingTexts) {
+    ctx.globalAlpha = ft.life / 60;
+    ctx.fillStyle = ft.color;
+    ctx.font = 'bold 16px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(ft.text, ft.x, ft.y);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawStartScreen() {
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.beginPath(); ctx.roundRect(W / 2 - 170, H / 2 - 130, 340, 270, 16); ctx.fill();
+
+  // 제목
+  ctx.fillStyle = '#e74c3c';
+  ctx.font = 'bold 16px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('진짜같은 가짜팬', W / 2, H / 2 - 100);
+
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 24px sans-serif';
+  ctx.fillText('박주석은 못말려 2', W / 2, H / 2 - 72);
+
+  ctx.fillStyle = '#f1c40f';
+  ctx.font = 'bold 13px sans-serif';
+  ctx.fillText('⚽ 축구공 피하기 에디션 ⚽', W / 2, H / 2 - 50);
+
+  ctx.font = '12px sans-serif';
+  ctx.fillStyle = '#ddd';
+  ctx.fillText('미끄러운 잔디 위에서', W / 2, H / 2 - 25);
+  ctx.fillText('쏟아지는 축구공을 피하세요!', W / 2, H / 2 - 7);
+
+  ctx.fillStyle = '#ffaa55';
+  ctx.font = '11px sans-serif';
+  ctx.fillText('🔥 불공 주의  |  ⚠ 폭격 경고  |  아이템 획득', W / 2, H / 2 + 18);
+
+  ctx.fillStyle = '#aaa';
+  ctx.font = '11px sans-serif';
+  ctx.fillText('벽에 부딪히면 뒤돌아서 까분다!', W / 2, H / 2 + 40);
+  ctx.fillText('← → 또는 화면 좌/우 터치', W / 2, H / 2 + 58);
+
+  if (Math.sin(time * 0.05) > 0) {
+    ctx.fillStyle = '#f1c40f';
+    ctx.font = 'bold 18px sans-serif';
+    ctx.fillText('탭하여 시작!', W / 2, H / 2 + 100);
+  }
+}
+
+function drawGameOver() {
+  ctx.fillStyle = 'rgba(0,0,0,0.7)';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  ctx.beginPath(); ctx.roundRect(W / 2 - 130, H / 2 - 95, 260, 230, 16); ctx.fill();
+
+  ctx.fillStyle = '#e74c3c';
+  ctx.font = 'bold 28px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('박주석 OUT!', W / 2, H / 2 - 50);
+
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 26px sans-serif';
+  ctx.fillText(`${score}점`, W / 2, H / 2 - 5);
+
+  if (combo > 5) {
+    ctx.fillStyle = '#ff9900';
+    ctx.font = '13px sans-serif';
+    ctx.fillText(`최대 콤보: ${combo}`, W / 2, H / 2 + 20);
+  }
+
+  if (score >= highScore && score > 0) {
+    ctx.fillStyle = '#f1c40f';
+    ctx.font = 'bold 16px sans-serif';
+    ctx.fillText('🏆 NEW RECORD!', W / 2, H / 2 + 45);
+  }
+
+  ctx.fillStyle = '#aaa';
+  ctx.font = '12px sans-serif';
+  ctx.fillText(`최고기록: ${highScore}  |  ${matchWins}승  |  승점 ${matchWins * 3}`, W / 2, H / 2 + 70);
+
+  // 다시시작 버튼
+  const btnY = H / 2 + 90;
+  restartBtn.y = btnY;
+  const pulse = Math.sin(time * 0.06) * 0.15 + 1;
+
+  ctx.save();
+  ctx.translate(W / 2, btnY + 22);
+  ctx.scale(pulse, pulse);
+  ctx.translate(-W / 2, -(btnY + 22));
+
+  ctx.fillStyle = '#f1c40f';
+  ctx.beginPath(); ctx.roundRect(restartBtn.x, btnY, restartBtn.w, restartBtn.h, 22); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.roundRect(restartBtn.x, btnY, restartBtn.w, restartBtn.h, 22); ctx.stroke();
+
+  ctx.fillStyle = '#222';
+  ctx.font = 'bold 16px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('다시 시작', W / 2, btnY + 28);
+
+  ctx.restore();
+}
+
+// ========== 충돌 ==========
+function checkCollision(b) {
+  const px = player.x, py = player.y - 8, pw = 14, ph = 34;
+  const cx = Math.max(px - pw, Math.min(b.x, px + pw));
+  const cy = Math.max(py - ph, Math.min(b.y, py + ph));
+  const dx = b.x - cx, dy = b.y - cy;
+  return (dx * dx + dy * dy) < (b.r * 0.85) * (b.r * 0.85);
+}
+
+function checkItemCollision(item) {
+  const dx = player.x - item.x, dy = (player.y - 10) - item.y;
+  return Math.sqrt(dx * dx + dy * dy) < 28;
+}
+
+// ========== 업데이트 ==========
+function update() {
+  time++;
+  screenShakeX *= 0.85;
+  screenShakeY *= 0.85;
+
+  // 전환 타이머 (경기종료/엔딩)
+  if (state === 'matchEnd' || state === 'ending') {
+    transitionTimer--;
+    if (state === 'matchEnd' && transitionTimer <= 0) {
+      nextMatch();
+    }
+    return;
+  }
+
+  if (state !== 'playing') return;
+
+  difficulty = 1 + time * 0.004;
+
+  const prevScore = score;
+  if (time % 30 === 0) {
+    const bonus = Math.floor(combo / 10);
+    score += 1 + bonus;
+    totalScore = score;
+    combo++;
+  }
+
+  // 전광판 타이머
+  if (boardTimer > 0) boardTimer--;
+
+  // 골 체크: 10점마다 (경기 내 상대점수 기준)
+  const matchScore = score - lastGoalScore;
+  if (prevScore !== score && matchScore > 0 && matchScore % 10 === 0 && busanGoals < 3) {
+    busanGoals++;
+    const scorer = busanPlayers[Math.floor(Math.random() * busanPlayers.length)];
+    goalScorers.push(scorer);
+    boardMessage = `⚽ GOAL! ${scorer} 골!!`;
+    boardTimer = 150;
+    shake(10);
+    addFloatingText(W / 2, H / 2, '⚽ GOAL!', '#f1c40f');
+  }
+
+  // 경기종료 체크: 30점마다
+  if (prevScore !== score && matchScore >= 30) {
+    matchWins++;
+    boardMessage = `경기종료! 부산 ${busanGoals} - ${opponentGoals} ${matchOpponent}\n승점 3점 획득!`;
+    boardTimer = 240;
+    state = 'matchEnd';
+    transitionTimer = 240;
+
+    // 승격 엔딩 체크 (200점)
+    if (totalScore >= 200) {
+      state = 'ending';
+      transitionTimer = 9999;
+      boardMessage = '';
+    }
+    return;
+  }
+
+  if (itemTimer > 0) { itemTimer--; if (itemTimer <= 0) itemActive = null; }
+
+  // 이동 (미끄러운 느낌 강화)
+  const accel = itemActive === 'magnet' ? 0.8 : player.accel;
+  const maxSpd = itemActive === 'magnet' ? 10 : player.maxSpeed;
+  if (inputLeft) player.ax = -accel;
+  else if (inputRight) player.ax = accel;
+  else player.ax = 0;
+
+  player.vx += player.ax;
+  player.vx *= player.friction;
+  player.vx = Math.max(-maxSpd, Math.min(maxSpd, player.vx));
+  if (Math.abs(player.vx) < 0.05) player.vx = 0;
+  player.x += player.vx;
+
+  if (player.x < 18) {
+    player.x = 18; player.vx *= -0.5; shake(5);
+    facingBack = !facingBack;
+    if (time - lastSpeechTime > 60) triggerSpeech();
+  }
+  if (player.x > W - 18) {
+    player.x = W - 18; player.vx *= -0.5; shake(5);
+    facingBack = !facingBack;
+    if (time - lastSpeechTime > 60) triggerSpeech();
+  }
+  if (player.vx > 0.5) player.direction = 1;
+  else if (player.vx < -0.5) player.direction = -1;
+
+  player.frameTimer++;
+  if (player.frameTimer > 3) { player.frame++; player.frameTimer = 0; }
+  if (player.invincible > 0) player.invincible--;
+
+  // 스폰
+  const baseRate = Math.max(8, 28 - difficulty * 2.5);
+  if (time % Math.floor(baseRate) === 0) spawnBall();
+
+  if (difficulty >= 3 && time % Math.floor(Math.max(35, 75 - difficulty * 3)) === 0) spawnFireBall();
+
+  if (difficulty >= 4 && Math.random() < 0.003 * difficulty && !dangerZone) {
+    const zw = 60 + Math.random() * 80;
+    dangerZone = { x: Math.random() * (W - zw), w: zw };
+    dangerTimer = 90;
+  }
+
+  if (dangerZone) {
+    dangerTimer--;
+    if (dangerTimer <= 0) {
+      const count = 6 + Math.floor(difficulty * 0.5);
+      for (let i = 0; i < count; i++) {
+        const bx = dangerZone.x + Math.random() * dangerZone.w;
+        setTimeout(() => spawnBall(bx, 5 + difficulty * 0.3), i * 50);
+      }
+      shake(8);
+      dangerZone = null;
+    }
+  }
+
+  if (time % 600 === 0 && Math.random() < 0.7) spawnItem();
+
+  // 공
+  const speedMult = itemActive === 'slow' ? 0.4 : 1;
+  for (let i = balls.length - 1; i >= 0; i--) {
+    const b = balls[i];
+    b.y += b.vy * speedMult;
+    b.x += (b.vx || 0) * speedMult;
+    b.rotation += b.rotSpeed;
+    if (b.x < b.r) { b.x = b.r; b.vx = Math.abs(b.vx || 0); }
+    if (b.x > W - b.r) { b.x = W - b.r; b.vx = -Math.abs(b.vx || 0); }
+    if (b.y > H + b.r * 2) { balls.splice(i, 1); continue; }
+
+    if (player.invincible <= 0 && checkCollision(b)) {
+      if (itemActive === 'shield') {
+        itemActive = null; itemTimer = 0;
+        addParticles(b.x, b.y, '#f1c40f', 15);
+        addFloatingText(player.x, player.y - 40, 'BLOCKED!', '#f1c40f');
+        balls.splice(i, 1); shake(5); player.invincible = 30;
+        continue;
+      }
+      state = 'over';
+      if (score > highScore) { highScore = score; localStorage.setItem('ballDodgeHigh5', highScore.toString()); }
+      addParticles(player.x, player.y, '#e74c3c', 25);
+      addParticles(b.x, b.y, '#fff', 12);
+      shake(12);
+      break;
+    }
+  }
+
+  // 아이템
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i];
+    item.y += item.vy;
+    if (item.y > H + 20) { items.splice(i, 1); continue; }
+    if (checkItemCollision(item)) {
+      itemActive = item.type;
+      itemTimer = item.type === 'slow' ? 300 : item.type === 'shield' ? 600 : 240;
+      addParticles(item.x, item.y, '#f1c40f', 12);
+      const labels = { slow: '⏱ SLOW!', shield: '🛡 SHIELD!', magnet: '⚡ SPEED!' };
+      addFloatingText(item.x, item.y - 20, labels[item.type], '#f1c40f');
+      items.splice(i, 1);
+    }
+  }
+
+  // 파티클
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx; p.y += p.vy; p.vy += 0.12; p.life--;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+  for (let i = floatingTexts.length - 1; i >= 0; i--) {
+    const ft = floatingTexts[i];
+    ft.y += ft.vy; ft.life--;
+    if (ft.life <= 0) floatingTexts.splice(i, 1);
+  }
+
+  // 말풍선 타이머
+  if (speechBubble.timer > 0) speechBubble.timer--;
+
+  // 랜덤 말풍선 (3~6초마다)
+  if (time - lastSpeechTime > 180 + Math.random() * 180 && speechBubble.timer <= 0) {
+    triggerSpeech();
+  }
+}
+
+// ========== 경기종료 화면 ==========
+function drawMatchEnd() {
+  ctx.fillStyle = 'rgba(0,0,0,0.7)';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.beginPath(); ctx.roundRect(W / 2 - 150, H / 2 - 110, 300, 220, 16); ctx.fill();
+
+  // 경기결과
+  ctx.fillStyle = '#f1c40f';
+  ctx.font = 'bold 16px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('경기 종료!', W / 2, H / 2 - 80);
+
+  // 스코어보드
+  ctx.fillStyle = '#e74c3c';
+  ctx.font = 'bold 14px sans-serif';
+  ctx.textAlign = 'right';
+  ctx.fillText('부산', W / 2 - 30, H / 2 - 48);
+
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 32px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(`${busanGoals}`, W / 2 - 18, H / 2 - 30);
+  ctx.font = 'bold 18px sans-serif';
+  ctx.fillText('-', W / 2, H / 2 - 32);
+  ctx.font = 'bold 32px sans-serif';
+  ctx.fillText(`${opponentGoals}`, W / 2 + 18, H / 2 - 30);
+
+  ctx.fillStyle = '#88bbff';
+  ctx.font = 'bold 14px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText(matchOpponent, W / 2 + 30, H / 2 - 48);
+
+  // 골 기록
+  if (goalScorers.length > 0) {
+    ctx.fillStyle = '#ccc';
+    ctx.font = '11px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('득점: ' + goalScorers.join(', '), W / 2, H / 2 - 5);
+  }
+
+  // 승점
+  ctx.fillStyle = '#2ecc71';
+  ctx.font = 'bold 18px sans-serif';
+  ctx.fillText('승점 3점 획득!', W / 2, H / 2 + 30);
+
+  ctx.fillStyle = '#fff';
+  ctx.font = '13px sans-serif';
+  ctx.fillText(`누적 승점: ${matchWins * 3}  |  다음 상대 준비중...`, W / 2, H / 2 + 58);
+
+  // 진행 바
+  const progress = Math.min(totalScore / 200, 1);
+  ctx.fillStyle = 'rgba(255,255,255,0.15)';
+  ctx.beginPath(); ctx.roundRect(W / 2 - 80, H / 2 + 72, 160, 10, 5); ctx.fill();
+  ctx.fillStyle = '#f1c40f';
+  ctx.beginPath(); ctx.roundRect(W / 2 - 80, H / 2 + 72, 160 * progress, 10, 5); ctx.fill();
+  ctx.fillStyle = '#aaa';
+  ctx.font = '9px sans-serif';
+  ctx.fillText(`승격까지 ${Math.max(0, 200 - totalScore)}점`, W / 2, H / 2 + 98);
+}
+
+// ========== 승격 엔딩 ==========
+function drawEnding() {
+  // 배경 (화려하게)
+  ctx.fillStyle = 'rgba(0,0,0,0.8)';
+  ctx.fillRect(0, 0, W, H);
+
+  // 빛나는 파티클
+  for (let i = 0; i < 20; i++) {
+    const ex = (i * 73.7 + time * 0.5) % W;
+    const ey = (i * 53.3 + time * 0.3) % H;
+    const es = 1.5 + Math.sin(time * 0.03 + i) * 1;
+    ctx.fillStyle = `rgba(255,${200 + i * 3},0,${0.3 + Math.sin(time * 0.05 + i) * 0.2})`;
+    ctx.beginPath(); ctx.arc(ex, ey, es, 0, Math.PI * 2); ctx.fill();
+  }
+
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.beginPath(); ctx.roundRect(W / 2 - 160, H / 2 - 160, 320, 340, 20); ctx.fill();
+
+  // 트로피
+  const tBounce = Math.sin(time * 0.04) * 5;
+  ctx.font = `${50 + Math.sin(time * 0.05) * 3}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.fillText('🏆', W / 2, H / 2 - 100 + tBounce);
+
+  // 승격!
+  const flash = Math.sin(time * 0.08);
+  ctx.fillStyle = flash > 0 ? '#f1c40f' : '#ff6600';
+  ctx.font = 'bold 28px sans-serif';
+  ctx.fillText('부산 아이파크', W / 2, H / 2 - 50);
+
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 24px sans-serif';
+  ctx.fillText('K리그1 승격!!', W / 2, H / 2 - 20);
+
+  // 전적
+  ctx.fillStyle = '#ccc';
+  ctx.font = '13px sans-serif';
+  ctx.fillText(`${matchWins}승  |  승점 ${matchWins * 3}  |  총 ${totalScore}점`, W / 2, H / 2 + 15);
+
+  ctx.fillStyle = '#ffaa55';
+  ctx.font = '12px sans-serif';
+  ctx.fillText('진짜같은 가짜팬 박주석의 응원 덕분에', W / 2, H / 2 + 45);
+  ctx.fillText('부산 아이파크가 승격했습니다!', W / 2, H / 2 + 63);
+
+  ctx.fillStyle = '#e74c3c';
+  ctx.font = 'bold 14px sans-serif';
+  ctx.fillText('사나이 자존심 부산에 걸었다!', W / 2, H / 2 + 95);
+
+  // 다시시작 버튼
+  const btnY = H / 2 + 120;
+  restartBtn.y = btnY;
+  const pulse = Math.sin(time * 0.06) * 0.1 + 1;
+  ctx.save();
+  ctx.translate(W / 2, btnY + 22);
+  ctx.scale(pulse, pulse);
+  ctx.translate(-W / 2, -(btnY + 22));
+  ctx.fillStyle = '#f1c40f';
+  ctx.beginPath(); ctx.roundRect(restartBtn.x, btnY, restartBtn.w, restartBtn.h, 22); ctx.fill();
+  ctx.fillStyle = '#222';
+  ctx.font = 'bold 15px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('다시 도전!', W / 2, btnY + 28);
+  ctx.restore();
+}
+
+// ========== 렌더 ==========
+function render() {
+  ctx.save();
+  ctx.translate(screenShakeX, screenShakeY);
+
+  ctx.drawImage(fieldBg, 0, 0);
+
+  if (itemActive === 'slow') {
+    ctx.fillStyle = 'rgba(50,100,255,0.08)';
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  drawDangerZone();
+
+  for (const p of particles) {
+    ctx.globalAlpha = p.life / p.maxLife;
+    ctx.fillStyle = p.color;
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  if (state === 'playing') {
+    for (const b of balls) {
+      if (b.y < 20) {
+        ctx.strokeStyle = b.type === 'fire' ? 'rgba(255,100,0,0.2)' : 'rgba(255,255,255,0.12)';
+        ctx.setLineDash([3, 5]);
+        ctx.beginPath(); ctx.moveTo(b.x, b.y + b.r); ctx.lineTo(b.x, H); ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+  }
+
+  for (const b of balls) drawBallSprite(b);
+  for (const item of items) drawItem(item);
+  drawPlayer();
+  if (state === 'playing') drawSpeechBubble();
+
+  if (state === 'playing') drawUI();
+  else if (state === 'ready') drawStartScreen();
+  else if (state === 'over') drawGameOver();
+  else if (state === 'matchEnd') drawMatchEnd();
+  else if (state === 'ending') drawEnding();
+
+  ctx.restore();
+}
+
+// 60fps 고정 (120Hz 폰에서도 동일한 속도)
+let lastFrameTime = 0;
+const FRAME_INTERVAL = 1000 / 60; // 16.67ms
+let accumulator = 0;
+
+function gameLoop(timestamp) {
+  if (!lastFrameTime) lastFrameTime = timestamp;
+  const elapsed = timestamp - lastFrameTime;
+  lastFrameTime = timestamp;
+  accumulator += elapsed;
+
+  // 60fps 간격으로만 업데이트 (밀린 프레임은 최대 3번까지)
+  let steps = 0;
+  while (accumulator >= FRAME_INTERVAL && steps < 3) {
+    update();
+    accumulator -= FRAME_INTERVAL;
+    steps++;
+  }
+
+  render();
+  requestAnimationFrame(gameLoop);
+}
+requestAnimationFrame(gameLoop);
+</script>
+</body>
+</html>

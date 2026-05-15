@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>박주석은 못말려3 - 벽돌깨기</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:#0a1628;display:flex;justify-content:center;align-items:center;height:100vh;overflow:hidden;touch-action:none;font-family:'Segoe UI',sans-serif}
+  canvas{border-radius:8px;box-shadow:0 0 30px rgba(0,100,255,0.2)}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<script>
+const canvas=document.getElementById('game');
+const ctx=canvas.getContext('2d');
+const W=Math.min(window.innerWidth,420);
+const H=Math.min(window.innerHeight,720);
+canvas.width=W;canvas.height=H;
+
+// ========== 축구공 프리렌더 (v2 동일) ==========
+function createSoccerBallImage(size) {
+  const res = size * 6;
+  const c = document.createElement('canvas');
+  c.width = c.height = res;
+  const g = c.getContext('2d');
+  const midX = res / 2, midY = res / 2, R = res * 0.45;
+  const DEG = Math.PI / 180;
+  const armAng = [0,1,2,3,4].map(i => (-90 + i * 72) * DEG);
+  const hexAng = [0,1,2,3,4].map(i => (-54 + i * 72) * DEG);
+  function polar(r, a) { return [midX + R * r * Math.cos(a), midY + R * r * Math.sin(a)]; }
+  const v = [];
+  for (let i = 0; i < 5; i++) v.push(polar(0.30, armAng[i]));
+  for (let i = 0; i < 5; i++) v.push(polar(0.62, armAng[i]));
+  for (let j = 0; j < 5; j++) { v.push(polar(0.82, hexAng[j] - 18 * DEG)); v.push(polar(0.82, hexAng[j] + 18 * DEG)); }
+  for (let i = 0; i < 5; i++) { v.push(polar(0.99, armAng[i] - 30 * DEG)); v.push(polar(0.99, armAng[i] + 30 * DEG)); }
+  g.save(); g.beginPath(); g.arc(midX, midY, R, 0, Math.PI * 2); g.clip();
+  const bg = g.createRadialGradient(midX - R * 0.25, midY - R * 0.28, R * 0.05, midX + R * 0.08, midY + R * 0.08, R);
+  bg.addColorStop(0, '#ffffff'); bg.addColorStop(0.45, '#f8f8f8'); bg.addColorStop(0.75, '#e4e4e4'); bg.addColorStop(1, '#ababab');
+  g.fillStyle = bg; g.beginPath(); g.arc(midX, midY, R, 0, Math.PI * 2); g.fill();
+  const seamW = res * 0.02, seamCol = 'rgba(35,35,35,0.6)';
+  function drawFace(indices, fill) {
+    g.beginPath(); indices.forEach((vi, i) => { if (i === 0) g.moveTo(v[vi][0], v[vi][1]); else g.lineTo(v[vi][0], v[vi][1]); });
+    g.closePath(); g.fillStyle = fill; g.fill(); g.strokeStyle = seamCol; g.lineWidth = seamW; g.lineJoin = 'round'; g.stroke();
+  }
+  for (let j = 0; j < 5; j++) { const next = (j + 1) % 5; drawFace([j, 5+j, 10+2*j, 10+2*j+1, 5+next, next], '#f3f3f1'); }
+  for (let i = 0; i < 5; i++) { const prev = (i + 4) % 5; drawFace([5+i, 10+2*i, 20+2*i+1, 20+2*i, 10+2*prev+1], '#1a1a1a'); }
+  drawFace([0, 1, 2, 3, 4], '#111111');
+  g.strokeStyle = seamCol; g.lineWidth = seamW; g.lineCap = 'round';
+  for (let i = 0; i < 5; i++) { const a = 20+2*i+1, b = 20+2*((i+1)%5); g.beginPath(); g.moveTo(v[a][0], v[a][1]); g.lineTo(v[b][0], v[b][1]); g.stroke(); }
+  g.restore();
+  const hl = g.createRadialGradient(midX - R * 0.32, midY - R * 0.35, 0, midX - R * 0.1, midY - R * 0.1, R * 0.55);
+  hl.addColorStop(0, 'rgba(255,255,255,0.6)'); hl.addColorStop(0.35, 'rgba(255,255,255,0.18)'); hl.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = hl; g.beginPath(); g.arc(midX, midY, R, 0, Math.PI * 2); g.fill();
+  g.strokeStyle = 'rgba(0,0,0,0.18)'; g.lineWidth = res * 0.012; g.beginPath(); g.arc(midX, midY, R, 0, Math.PI * 2); g.stroke();
+  return c;
+}
+const ballImg = createSoccerBallImage(8); // 공 크기 8에 맞춰 프리렌더
+
+// ========== 팀 데이터 ==========
+const STAGES=[
+  {name:'대구FC',primary:'#6DCEF5',secondary:'#001E37',accent:'#B8E4FA',
+   ballSpeed:6.5,paddleW:58,desc:'태양을 무너뜨려라!'},
+  {name:'수원FC',primary:'#1a2d6b',secondary:'#E6001D',accent:'#FCCB16',
+   ballSpeed:7.5,paddleW:52,desc:'방패를 부숴라!'},
+  {name:'수원삼성',primary:'#0056A6',secondary:'#E60012',accent:'#FFFFFF',
+   ballSpeed:8,paddleW:46,desc:'블루윙즈를 격파하라!'},
+];
+
+// 엠블럼 벽돌 맵 9×7 (1=일반, 0=빈칸)
+// 글자 블럭은 createBricks에서 별도로 추가 (HP2, 팀명)
+const MAP_SUN=[
+  [0,0,0,0,1,0,0,0,0],
+  [0,0,1,1,1,1,1,0,0],
+  [0,1,0,1,1,1,0,1,0],
+  [1,1,1,1,1,1,1,1,1],
+  [0,1,0,1,1,1,0,1,0],
+  [0,0,1,1,1,1,1,0,0],
+  [0,0,0,0,1,0,0,0,0],
+];
+const MAP_SHIELD=[
+  [0,1,1,1,1,1,1,1,0],
+  [0,1,1,1,1,1,1,1,0],
+  [0,1,1,1,1,1,1,1,0],
+  [0,1,1,1,1,1,1,1,0],
+  [0,0,1,1,1,1,1,0,0],
+  [0,0,0,1,1,1,0,0,0],
+  [0,0,0,0,1,0,0,0,0],
+];
+const MAP_WINGS=[
+  [1,0,0,0,1,0,0,0,1],
+  [1,1,0,1,1,1,0,1,1],
+  [1,1,1,1,1,1,1,1,1],
+  [0,1,1,1,1,1,1,1,0],
+  [0,0,1,1,1,1,1,0,0],
+  [0,0,0,1,1,1,0,0,0],
+  [0,0,0,0,1,0,0,0,0],
+];
+const MAPS=[MAP_SUN,MAP_SHIELD,MAP_WINGS];
+// 팀이름 글자 (블럭에 한 글자씩, HP2) + 배댈OUT (빨간색, HP2)
+const TEAM_LETTERS=[
+  {chars:'대구FC', positions:[[2,1],[3,1],[5,1],[6,1]]},
+  {chars:'수원FC', positions:[[2,1],[3,1],[5,1],[6,1]]},
+  {chars:'수원삼성', positions:[[2,1],[3,1],[5,1],[6,1]]},
+];
+// 배댈OUT 블럭 (각 스테이지 하단 중앙에)
+const BADAL_LETTERS=[
+  {chars:'배댈OUT', positions:[[3,5],[4,5],[5,5]]}, // 배,댈,OUT → 첫 3글자만(배,댈,OUT)
+  {chars:'배댈OUT', positions:[[3,4],[4,4],[5,4]]},
+  {chars:'배댈OUT', positions:[[3,4],[4,4],[5,4]]},
+];
+
+// ========== 게임 상태 ==========
+let state='ready';
+let stageIdx=0;
+let stage=STAGES[0];
+let time=0;
+let bricks=[];
+let balls=[];
+let particles=[];
+let floatingTexts=[];
+let screenShakeX=0,screenShakeY=0;
+let lives=3;
+let score=0;
+
+const paddle={x:W/2,y:H*0.62,w:70,h:10,vx:0}; // 화면 62% 위치 (블럭과 가까움)
+let inputLeft=false,inputRight=false;
+
+const speeches=[
+  '부산은 하나다!','아이파크 파이팅!','부산의 자존심!','승리는 부산의 것!',
+  '달려라 부산!','부산 이겨라!','골! 골! 골!','부산 최고!',
+  '끝까지 간다!','부산 힘내라!','우리가 부산이다!','부산 불패!',
+  '한 골만 더!','아파크 가자!','광안리의 함성!','부산 전진!',
+  '배댈 꺼져!','배달이나 해라!','배댈은 가짜팬!','배댈 망해라~',
+  '나 박주석이다!','박주석이 최고야!','HDC 최고!','때려 부숴!',
+  '심판 눈 떠라!','그게 축구냐!','집에 가라!',
+];
+let speechBubble={text:'',timer:0};
+let bricksDestroyed=0; // 깬 블럭 수 (라이프 회복용)
+
+// ========== 입력 (좌/우 버튼 방식) ==========
+document.addEventListener('keydown',e=>{
+  if(e.key==='ArrowLeft'||e.key==='a')inputLeft=true;
+  if(e.key==='ArrowRight'||e.key==='d')inputRight=true;
+  if(state==='ready')startGame();
+  if((state==='stageClear'||state==='gameOver'||state==='gameWin')&&(e.key==='Enter'||e.key===' ')){
+    if(state==='stageClear')nextStage(); else startGame();
+  }
+});
+document.addEventListener('keyup',e=>{
+  if(e.key==='ArrowLeft'||e.key==='a')inputLeft=false;
+  if(e.key==='ArrowRight'||e.key==='d')inputRight=false;
+});
+
+// 터치: 화면 좌반 = 왼쪽, 우반 = 오른쪽
+canvas.addEventListener('touchstart',e=>{
+  e.preventDefault();
+  if(state!=='playing'){
+    if(state==='ready')startGame();
+    else if(state==='stageClear')nextStage();
+    else startGame();
+    return;
+  }
+  const r=canvas.getBoundingClientRect();
+  const tx=e.touches[0].clientX-r.left;
+  if(tx<W/2) inputLeft=true; else inputRight=true;
+});
+canvas.addEventListener('touchend',e=>{e.preventDefault();inputLeft=false;inputRight=false;});
+canvas.addEventListener('mousedown',e=>{
+  if(state!=='playing'){
+    if(state==='ready')startGame();
+    else if(state==='stageClear')nextStage();
+    else startGame();
+    return;
+  }
+  const r=canvas.getBoundingClientRect();
+  if(e.clientX-r.left<W/2) inputLeft=true; else inputRight=true;
+});
+canvas.addEventListener('mouseup',()=>{inputLeft=false;inputRight=false;});
+
+// ========== 벽돌 생성 (엠블럼 맵 기반) ==========
+function createBricks(){
+  bricks=[];
+  const map=MAPS[stageIdx];
+  const cols=9;
+  const margin=20;
+  const bw=(W-margin*2)/cols;
+  const bh=24;
+  const gap=3;
+  const topY=45;
+  const tl=TEAM_LETTERS[stageIdx];
+  const teamChars=tl.chars.split('');
+  const teamPos=tl.positions;
+  const bl=BADAL_LETTERS[stageIdx];
+  const badalChars=['배','댈','OUT'];
+  const badalPos=bl.positions;
+
+  for(let r=0;r<map.length;r++){
+    for(let c=0;c<cols;c++){
+      if(map[r][c]===0)continue;
+      // 팀이름 글자인지
+      let letter=null, isBadal=false;
+      for(let li=0;li<teamPos.length;li++){
+        if(teamPos[li][0]===c&&teamPos[li][1]===r){ letter=teamChars[li]; break; }
+      }
+      // 배댈OUT 글자인지
+      if(!letter){
+        for(let li=0;li<badalPos.length;li++){
+          if(badalPos[li][0]===c&&badalPos[li][1]===r){ letter=badalChars[li]; isBadal=true; break; }
+        }
+      }
+      const hp=letter?2:1;
+      bricks.push({x:margin+c*bw,y:topY+r*(bh+gap),w:bw-gap,h:bh,hp,maxHp:hp,col:c,row:r,letter,isBadal});
+    }
+  }
+}
+
+function createBall(){
+  const angle=-Math.PI/2+(Math.random()-0.5)*0.5;
+  balls.push({
+    x:paddle.x,y:paddle.y-10,
+    vx:Math.cos(angle)*stage.ballSpeed,
+    vy:Math.sin(angle)*stage.ballSpeed,
+    r:8,trail:[],rot:0 // 공 크기 8, rot=회전각
+  });
+}
+
+function startGame(){
+  stageIdx=0;stage=STAGES[0];lives=3;score=0;time=0;
+  particles=[];floatingTexts=[];loadStage();
+}
+function loadStage(){
+  stage=STAGES[stageIdx];paddle.w=stage.paddleW;paddle.x=W/2;paddle.vx=0;
+  balls=[];bricksDestroyed=0;createBricks();createBall();
+  if(stageIdx>=1) createBall(); // 2R부터 공 2개
+  state='playing';
+  speechBubble={text:`${stageIdx+1}R  vs ${stage.name}!`,timer:120};
+}
+function nextStage(){
+  stageIdx++;
+  if(stageIdx>=STAGES.length){state='gameWin';return;}
+  loadStage();
+}
+
+function addParticles(x,y,color,n){
+  for(let i=0;i<n;i++) particles.push({x,y,vx:(Math.random()-0.5)*7,vy:(Math.random()-0.5)*7,life:20+Math.random()*15,maxLife:35,color,size:2+Math.random()*2});
+}
+function addFloat(x,y,text,color){floatingTexts.push({x,y,text,color,life:50,vy:-1.5});}
+function shake(n){screenShakeX=(Math.random()-0.5)*n;screenShakeY=(Math.random()-0.5)*n;}
+
+// ========== 업데이트 ==========
+function update(){
+  time++;
+  screenShakeX*=0.85;screenShakeY*=0.85;
+  if(state!=='playing')return;
+
+  // 패들 이동 (좌우 버튼 방식 - 미끄러움)
+  const accel=0.8, friction=0.88, maxSpd=9;
+  if(inputLeft) paddle.vx-=accel;
+  else if(inputRight) paddle.vx+=accel;
+  else paddle.vx*=0.85;
+  paddle.vx*=friction;
+  paddle.vx=Math.max(-maxSpd,Math.min(maxSpd,paddle.vx));
+  paddle.x+=paddle.vx;
+  if(paddle.x<paddle.w/2){paddle.x=paddle.w/2;paddle.vx*=-0.3;}
+  if(paddle.x>W-paddle.w/2){paddle.x=W-paddle.w/2;paddle.vx*=-0.3;}
+
+  // 공
+  for(let bi=balls.length-1;bi>=0;bi--){
+    const b=balls[bi];
+    b.trail.push({x:b.x,y:b.y});
+    if(b.trail.length>8) b.trail.shift();
+    b.x+=b.vx;b.y+=b.vy;
+    // 이동 방향/속도에 따라 회전 (굴러가는 느낌)
+    b.rot+=b.vx*0.08;
+
+    if(b.x<b.r){b.x=b.r;b.vx*=-1;}
+    if(b.x>W-b.r){b.x=W-b.r;b.vx*=-1;}
+    if(b.y<b.r){b.y=b.r;b.vy*=-1;}
+
+    if(b.y>GAME_BOTTOM+10){
+      balls.splice(bi,1);
+      if(balls.length===0){
+        lives--;
+        // 와장창 효과!
+        shake(15);
+        for(let k=0;k<30;k++) addParticles(paddle.x+(Math.random()-0.5)*paddle.w,paddle.y,'#e74c3c',1);
+        addFloat(W/2,paddle.y-40,'💔 MISS!','#ff3333');
+        if(lives<=0){state='gameOver';shake(20);}
+        else{
+          createBall();
+          const missMsgs=['앗! 놓쳤다!','아이고!','으악!','집중해 박주석!','정신차려!'];
+          speechBubble={text:missMsgs[Math.floor(Math.random()*missMsgs.length)],timer:90};
+        }
+      }
+      continue;
+    }
+
+    // 패들 충돌
+    const barY=paddle.y;
+    if(b.vy>0&&b.y+b.r>=barY&&b.y-b.r<=barY+9&&
+       b.x>=paddle.x-paddle.w/2&&b.x<=paddle.x+paddle.w/2){
+      const hit=(b.x-paddle.x)/(paddle.w/2);
+      const ang=-Math.PI/2+hit*Math.PI/3;
+      const spd=Math.sqrt(b.vx*b.vx+b.vy*b.vy);
+      b.vx=Math.cos(ang)*spd;b.vy=Math.sin(ang)*spd;
+      b.y=barY-b.r;
+      addParticles(b.x,barY,'#fff',4);
+      shake(2);
+      // 패들 터치할 때마다 응원 멘트!
+      if(speechBubble.timer<=0 || Math.random()<0.4){
+        speechBubble={text:speeches[Math.floor(Math.random()*speeches.length)],timer:60};
+      }
+    }
+
+    // 벽돌 충돌 (1프레임에 1개만, 위치 보정)
+    let hitBrick=false;
+    for(let i=bricks.length-1;i>=0;i--){
+      const br=bricks[i];
+      if(b.x+b.r>br.x&&b.x-b.r<br.x+br.w&&b.y+b.r>br.y&&b.y-b.r<br.y+br.h){
+        // 겹침 정도 계산
+        const oL=b.x+b.r-br.x, oR=br.x+br.w-(b.x-b.r);
+        const oT=b.y+b.r-br.y, oB=br.y+br.h-(b.y-b.r);
+        const minH=Math.min(oL,oR), minV=Math.min(oT,oB);
+        // 반사 + 위치 밀어내기
+        if(minH<minV){
+          b.vx*=-1;
+          b.x+=(oL<oR?-minH:minH); // 벽돌 밖으로 밀어냄
+        } else {
+          b.vy*=-1;
+          b.y+=(oT<oB?-minV:minV);
+        }
+        br.hp--;score+=10;shake(3);
+        if(br.hp<=0){
+          addParticles(br.x+br.w/2,br.y+br.h/2,br.letter?'#ff6600':stage.primary,10);
+          score+=20;bricks.splice(i,1);
+          bricksDestroyed++;
+          if(bricksDestroyed%8===0&&lives<5){
+            lives++;addFloat(W/2,paddle.y-30,'♥ +1','#e74c3c');shake(4);
+          }
+          if(br.isBadal){
+            addFloat(br.x+br.w/2,br.y,'배댈 꺼져!','#ff3333');
+            speechBubble={text:'배달이나 해라!!',timer:80};
+          } else if(br.letter) addFloat(br.x+br.w/2,br.y,'💥','#ff6600');
+          if(Math.random()<0.15) speechBubble={text:speeches[Math.floor(Math.random()*speeches.length)],timer:80};
+        } else {
+          addParticles(br.x+br.w/2,br.y+br.h/2,'#fff',3);
+        }
+        hitBrick=true;
+        break; // 1프레임 1충돌만
+      }
+    }
+  }
+
+  if(bricks.length===0&&state==='playing'){
+    state='stageClear';shake(10);
+    addFloat(W/2,H/2-50,'CLEAR!','#f1c40f');
+    speechBubble={text:`${stage.name} 격파!`,timer:150};
+  }
+
+  for(let i=particles.length-1;i>=0;i--){const p=particles[i];p.x+=p.vx;p.y+=p.vy;p.vy+=0.1;p.life--;if(p.life<=0)particles.splice(i,1);}
+  for(let i=floatingTexts.length-1;i>=0;i--){const f=floatingTexts[i];f.y+=f.vy;f.life--;if(f.life<=0)floatingTexts.splice(i,1);}
+  if(speechBubble.timer>0) speechBubble.timer--;
+}
+
+// ========== 게임/조작 영역 경계 ==========
+const GAME_BOTTOM = Math.floor(H * 0.72); // 게임 영역 하단
+
+// ========== 그리기 ==========
+function drawBackground(){
+  // 게임 영역: 축구장 느낌
+  const grass=ctx.createLinearGradient(0,0,0,GAME_BOTTOM);
+  grass.addColorStop(0,'#2d8c3c');grass.addColorStop(1,'#1f6b2c');
+  ctx.fillStyle=grass;ctx.fillRect(0,0,W,GAME_BOTTOM);
+
+  // 잔디 줄무늬
+  for(let i=0;i<GAME_BOTTOM;i+=30){
+    ctx.fillStyle=i%60===0?'rgba(255,255,255,0.03)':'rgba(0,0,0,0.02)';
+    ctx.fillRect(0,i,W,30);
+  }
+  // 경기장 라인
+  ctx.strokeStyle='rgba(255,255,255,0.2)';ctx.lineWidth=1.5;
+  ctx.strokeRect(8,30,W-16,GAME_BOTTOM-38);
+  // 센터라인
+  ctx.beginPath();ctx.moveTo(8,GAME_BOTTOM/2+15);ctx.lineTo(W-8,GAME_BOTTOM/2+15);ctx.stroke();
+  // 센터서클
+  ctx.beginPath();ctx.arc(W/2,GAME_BOTTOM/2+15,35,0,Math.PI*2);ctx.stroke();
+  ctx.fillStyle='rgba(255,255,255,0.2)';
+  ctx.beginPath();ctx.arc(W/2,GAME_BOTTOM/2+15,2,0,Math.PI*2);ctx.fill();
+
+  // 조작 영역: 어두운 배경 + 구분선
+  ctx.fillStyle='#111a11';ctx.fillRect(0,GAME_BOTTOM,W,H-GAME_BOTTOM);
+  // 구분선
+  ctx.strokeStyle='rgba(255,255,255,0.15)';ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(0,GAME_BOTTOM);ctx.lineTo(W,GAME_BOTTOM);ctx.stroke();
+  // 좌/우 구분
+  ctx.strokeStyle='rgba(255,255,255,0.06)';ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(W/2,GAME_BOTTOM+10);ctx.lineTo(W/2,H-10);ctx.stroke();
+  // 좌우 화살표 안내
+  ctx.fillStyle='rgba(255,255,255,0.12)';ctx.font='bold 28px sans-serif';ctx.textAlign='center';
+  ctx.fillText('◀',W*0.25,GAME_BOTTOM+(H-GAME_BOTTOM)/2+10);
+  ctx.fillText('▶',W*0.75,GAME_BOTTOM+(H-GAME_BOTTOM)/2+10);
+  ctx.fillStyle='rgba(255,255,255,0.08)';ctx.font='10px sans-serif';
+  ctx.fillText('터치',W*0.25,GAME_BOTTOM+(H-GAME_BOTTOM)/2+28);
+  ctx.fillText('터치',W*0.75,GAME_BOTTOM+(H-GAME_BOTTOM)/2+28);
+}
+
+function drawBrick(br){
+  const dmg=1-br.hp/br.maxHp;
+  const hasLetter=!!br.letter;
+
+  // 글자블럭
+  if(hasLetter){
+    if(br.isBadal){
+      // 배댈OUT: 빨간 배경 + 검은 테두리
+      ctx.fillStyle='#cc2222';
+      ctx.globalAlpha=1-dmg*0.2;
+      ctx.beginPath();ctx.roundRect(br.x,br.y,br.w,br.h,4);ctx.fill();
+      ctx.globalAlpha=1;
+      ctx.strokeStyle='#550000';ctx.lineWidth=2;
+      ctx.beginPath();ctx.roundRect(br.x,br.y,br.w,br.h,4);ctx.stroke();
+      ctx.fillStyle='#fff';
+      ctx.font='bold 12px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText(br.letter,br.x+br.w/2,br.y+br.h/2+1);
+    } else {
+      // 팀이름: accent색 배경
+      ctx.fillStyle=stage.accent;
+      ctx.globalAlpha=1-dmg*0.2;
+      ctx.beginPath();ctx.roundRect(br.x,br.y,br.w,br.h,4);ctx.fill();
+      ctx.globalAlpha=1;
+      ctx.strokeStyle=stage.secondary;ctx.lineWidth=2;
+      ctx.beginPath();ctx.roundRect(br.x,br.y,br.w,br.h,4);ctx.stroke();
+      ctx.fillStyle=stage.secondary;
+      ctx.font='bold 13px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText(br.letter,br.x+br.w/2,br.y+br.h/2+1);
+    }
+  } else {
+    ctx.fillStyle=stage.primary;
+    ctx.globalAlpha=1-dmg*0.3;
+    ctx.beginPath();ctx.roundRect(br.x,br.y,br.w,br.h,3);ctx.fill();
+    ctx.globalAlpha=1;
+    ctx.strokeStyle='rgba(255,255,255,0.2)';ctx.lineWidth=1;
+    ctx.beginPath();ctx.roundRect(br.x,br.y,br.w,br.h,3);ctx.stroke();
+  }
+  // 데미지 금
+  if(dmg>0 && br.hp>0){
+    ctx.strokeStyle='rgba(255,255,255,0.5)';ctx.lineWidth=1;
+    ctx.beginPath();
+    ctx.moveTo(br.x+br.w*0.2,br.y);ctx.lineTo(br.x+br.w*0.5,br.y+br.h*0.5);
+    ctx.lineTo(br.x+br.w*0.8,br.y+br.h);ctx.stroke();
+  }
+}
+
+// 박주석이 응원수건(패들)을 머리 위로 양손에 펴서 들고있는 모습
+function drawPaddleCharacter(){
+  const px=paddle.x;
+  const pw=paddle.w;
+  const t=time;
+  const speed=Math.abs(paddle.vx);
+  const bounce=Math.sin(t*0.12)*1.5;
+
+  const barY=paddle.y; // 수건(패들) Y 위치
+  // 캐릭터 배치: 머리 바로 위에 수건
+  const headY=barY+14; // 수건-머리 간격 좁게
+  const cx=px, cy=headY+16+bounce; // 몸통 중심 (더 가까이)
+
+  // === 그림자 ===
+  ctx.fillStyle='rgba(0,0,0,0.12)';
+  ctx.beginPath();ctx.ellipse(cx,cy+22,13,3,0,0,Math.PI*2);ctx.fill();
+
+  // === 다리 ===
+  const legSwing=Math.sin(t*0.14)*7*(1+speed*0.2);
+  [[-4,1],[4,-1]].forEach(([tx,dir])=>{
+    ctx.save();ctx.translate(cx+tx,cy+8);ctx.rotate(legSwing*dir*Math.PI/180);
+    ctx.fillStyle='#1a1a1a';ctx.fillRect(-2,0,4,11);
+    ctx.fillStyle='#e74c3c';ctx.fillRect(-2.5,10,5,3);
+    ctx.restore();
+  });
+
+  // === 몸통 (유니폼 - 빨강+흰 스플릿) ===
+  ctx.fillStyle='#f5cba7'; // 목
+  ctx.fillRect(cx-3,cy-10,6,5);
+  ctx.fillStyle='#d42a2a';
+  ctx.beginPath();ctx.roundRect(cx-7,cy-5,7,16,[2,0,0,2]);ctx.fill();
+  ctx.fillStyle='#f5f5f5';
+  ctx.beginPath();ctx.roundRect(cx,cy-5,7,16,[0,2,2,0]);ctx.fill();
+  ctx.fillStyle='#333';ctx.font='bold 4px sans-serif';ctx.textAlign='center';
+  ctx.fillText('HDC',cx,cy+5);
+
+  // === 팔 (양손이 위로 올라가서 수건 양 끝 근처를 잡음) ===
+  // 손 위치 = 수건에서 약간 안쪽 (팔 길이 제한)
+  const armReach=18; // 팔 길이 제한
+  const shoulderL=cx-7, shoulderR=cx+7, shoulderY=cy-4;
+  const lhx=Math.max(shoulderL-armReach,px-pw/2+3);
+  const lhy=Math.max(barY+4,shoulderY-armReach);
+  const rhx=Math.min(shoulderR+armReach,px+pw/2-3);
+  const rhy=lhy;
+
+  ctx.lineCap='round';
+  // 왼팔 (소매+팔+손)
+  ctx.strokeStyle='#d42a2a';ctx.lineWidth=4;
+  ctx.beginPath();ctx.moveTo(shoulderL,shoulderY);ctx.lineTo(shoulderL-2,shoulderY-4);ctx.stroke();
+  ctx.strokeStyle='#f5cba7';ctx.lineWidth=3;
+  ctx.beginPath();ctx.moveTo(shoulderL-2,shoulderY-4);ctx.lineTo(lhx,lhy);ctx.stroke();
+  ctx.fillStyle='#f5cba7';ctx.beginPath();ctx.arc(lhx,lhy,2.5,0,Math.PI*2);ctx.fill();
+
+  // 오른팔
+  ctx.strokeStyle='#f5f5f5';ctx.lineWidth=4;
+  ctx.beginPath();ctx.moveTo(shoulderR,shoulderY);ctx.lineTo(shoulderR+2,shoulderY-4);ctx.stroke();
+  ctx.strokeStyle='#f5cba7';ctx.lineWidth=3;
+  ctx.beginPath();ctx.moveTo(shoulderR+2,shoulderY-4);ctx.lineTo(rhx,rhy);ctx.stroke();
+  ctx.fillStyle='#f5cba7';ctx.beginPath();ctx.arc(rhx,rhy,2.5,0,Math.PI*2);ctx.fill();
+
+  // === 머리 ===
+  ctx.fillStyle='#f5cba7';
+  ctx.beginPath();ctx.arc(cx,headY,10,0,Math.PI*2);ctx.fill();
+  // 머리카락
+  ctx.fillStyle='#1a1a1a';
+  ctx.beginPath();ctx.arc(cx,headY-4,9,Math.PI*0.8,Math.PI*2.2);ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(cx-7,headY-5);ctx.quadraticCurveTo(cx-4,headY+1,cx-1,headY-2);
+  ctx.quadraticCurveTo(cx+1,headY+2,cx+2,headY-2);
+  ctx.quadraticCurveTo(cx+5,headY+1,cx+7,headY-5);
+  ctx.arc(cx,headY-4,9,-0.2*Math.PI,-0.8*Math.PI,true);ctx.fill();
+
+  // === 수건/패들 (머리 위, 양손 사이에 펼쳐짐) ===
+  // 수건 본체 (흰색 바탕 + 빨간 술)
+  const towelY=barY;
+  ctx.fillStyle='#f8f0f0';
+  ctx.beginPath();ctx.roundRect(px-pw/2,towelY,pw,7,[2,2,2,2]);ctx.fill();
+  // 빨간 줄 (상하)
+  ctx.fillStyle='#d42a2a';
+  ctx.fillRect(px-pw/2,towelY,pw,1.5);
+  ctx.fillRect(px-pw/2,towelY+5.5,pw,1.5);
+  // 수건 양 끝 술 (프린지)
+  ctx.fillStyle='#d42a2a';
+  ctx.fillRect(px-pw/2-2,towelY,3,8);
+  ctx.fillRect(px+pw/2-1,towelY,3,8);
+  // 수건 글씨
+  ctx.fillStyle='#c0392b';ctx.font='bold 5px sans-serif';ctx.textAlign='center';
+  ctx.fillText('IPARK',px,towelY+5.5);
+
+  // 안경
+  const dir=paddle.vx>0.5?1:paddle.vx<-0.5?-1:0;
+  const eo=dir*1;
+  ctx.strokeStyle='#333';ctx.lineWidth=1.2;
+  ctx.beginPath();ctx.ellipse(cx-4+eo,headY+1,4,3.5,0,0,Math.PI*2);ctx.stroke();
+  ctx.beginPath();ctx.ellipse(cx+4+eo,headY+1,4,3.5,0,0,Math.PI*2);ctx.stroke();
+  ctx.lineWidth=0.8;
+  ctx.beginPath();ctx.moveTo(cx-8+eo,headY+1);ctx.lineTo(cx-10,headY+2);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(cx+8+eo,headY+1);ctx.lineTo(cx+10,headY+2);ctx.stroke();
+
+  // 눈
+  ctx.fillStyle='#1a1a1a';
+  ctx.beginPath();ctx.arc(cx-4+eo,headY,1.5,0,Math.PI*2);ctx.arc(cx+4+eo,headY,1.5,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle='#fff';
+  ctx.beginPath();ctx.arc(cx-3.5+eo,headY-0.8,0.6,0,Math.PI*2);ctx.arc(cx+4.5+eo,headY-0.8,0.6,0,Math.PI*2);ctx.fill();
+
+  // 입
+  ctx.strokeStyle='#c0392b';ctx.lineWidth=1;ctx.beginPath();
+  if(speed>4){
+    ctx.arc(cx,headY+6,3,0.05*Math.PI,0.95*Math.PI);
+  } else {
+    ctx.moveTo(cx-3,headY+5);ctx.quadraticCurveTo(cx,headY+8,cx+3,headY+5);
+  }
+  ctx.stroke();
+
+  // 홍조
+  ctx.fillStyle='rgba(255,130,130,0.25)';
+  ctx.beginPath();ctx.ellipse(cx-8,headY+3,3,1.5,0,0,Math.PI*2);ctx.ellipse(cx+8,headY+3,3,1.5,0,0,Math.PI*2);ctx.fill();
+}
+
+function drawBall(b){
+  // 트레일
+  for(let i=0;i<b.trail.length;i++){
+    const t=b.trail[i];
+    ctx.globalAlpha=(i/b.trail.length)*0.15;
+    ctx.fillStyle='#ddd';
+    ctx.beginPath();ctx.arc(t.x,t.y,b.r*(0.3+i/b.trail.length*0.7),0,Math.PI*2);ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  // v2 프리렌더 이미지 + 회전
+  const s=b.r*2;
+  ctx.save();
+  ctx.translate(b.x,b.y);
+  ctx.rotate(b.rot);
+  ctx.drawImage(ballImg,-s/2,-s/2,s,s);
+  ctx.restore();
+}
+
+function drawUI(){
+  ctx.fillStyle='rgba(0,0,0,0.5)';ctx.fillRect(0,0,W,30);
+  ctx.fillStyle=stage.primary;ctx.font='bold 11px sans-serif';ctx.textAlign='left';
+  ctx.fillText(`${stageIdx+1}/3R  vs ${stage.name}`,8,18);
+  ctx.fillStyle='#fff';ctx.font='bold 13px sans-serif';ctx.textAlign='center';
+  ctx.fillText(`${score}`,W/2,18);
+  ctx.textAlign='right';ctx.fillStyle='#e74c3c';ctx.font='11px sans-serif';
+  ctx.fillText('♥'.repeat(lives)+`  벽돌${bricks.length}`,W-8,18);
+
+  if(speechBubble.timer>0){
+    const a=Math.min(1,speechBubble.timer/20);
+    ctx.globalAlpha=a;
+    ctx.fillStyle='rgba(0,0,0,0.7)';ctx.font='bold 12px sans-serif';ctx.textAlign='center';
+    const tw=ctx.measureText(speechBubble.text).width+18;
+    ctx.beginPath();ctx.roundRect(W/2-tw/2,paddle.y-55,tw,22,8);ctx.fill();
+    ctx.fillStyle='#f1c40f';ctx.fillText(speechBubble.text,W/2,paddle.y-39);
+    ctx.globalAlpha=1;
+  }
+  for(const f of floatingTexts){
+    ctx.globalAlpha=f.life/50;ctx.fillStyle=f.color;
+    ctx.font='bold 22px sans-serif';ctx.textAlign='center';
+    ctx.fillText(f.text,f.x,f.y);
+  }
+  ctx.globalAlpha=1;
+
+}
+
+function drawStartScreen(){
+  drawBackground();
+  ctx.fillStyle='rgba(0,0,0,0.6)';ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='rgba(0,0,0,0.4)';
+  ctx.beginPath();ctx.roundRect(W/2-160,H/2-140,320,300,16);ctx.fill();
+
+  ctx.fillStyle='#e74c3c';ctx.font='bold 15px sans-serif';ctx.textAlign='center';
+  ctx.fillText('진짜같은 가짜팬',W/2,H/2-110);
+  ctx.fillStyle='#fff';ctx.font='bold 22px sans-serif';
+  ctx.fillText('박주석은 못말려 3',W/2,H/2-82);
+  ctx.fillStyle='#f1c40f';ctx.font='bold 13px sans-serif';
+  ctx.fillText('⚽ 벽돌깨기 에디션 ⚽',W/2,H/2-58);
+
+  for(let i=0;i<3;i++){
+    const ty=H/2-30+i*42;
+    ctx.fillStyle=STAGES[i].primary;
+    ctx.beginPath();ctx.roundRect(W/2-120,ty,240,34,6);ctx.fill();
+    ctx.fillStyle='#fff';ctx.font='bold 12px sans-serif';
+    ctx.fillText(`${i+1}R  ${STAGES[i].name} — ${STAGES[i].desc}`,W/2,ty+21);
+  }
+
+  ctx.fillStyle='#aaa';ctx.font='11px sans-serif';
+  ctx.fillText('화면 좌/우 터치 또는 ← →',W/2,H/2+115);
+  if(Math.sin(time*0.05)>0){
+    ctx.fillStyle='#f1c40f';ctx.font='bold 18px sans-serif';
+    ctx.fillText('탭하여 시작!',W/2,H/2+145);
+  }
+}
+
+function drawStageClear(){
+  ctx.fillStyle='rgba(0,0,0,0.7)';ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='rgba(0,0,0,0.4)';
+  ctx.beginPath();ctx.roundRect(W/2-130,H/2-80,260,180,16);ctx.fill();
+  ctx.fillStyle='#2ecc71';ctx.font='bold 24px sans-serif';ctx.textAlign='center';
+  ctx.fillText('STAGE CLEAR!',W/2,H/2-40);
+  ctx.fillStyle=stage.primary;ctx.font='bold 16px sans-serif';
+  ctx.fillText(`${stage.name} 격파!`,W/2,H/2-5);
+  ctx.fillStyle='#fff';ctx.font='14px sans-serif';
+  ctx.fillText(`점수: ${score}  |  ${'♥'.repeat(lives)}`,W/2,H/2+25);
+  if(stageIdx<STAGES.length-1){
+    ctx.fillStyle='#aaa';ctx.font='12px sans-serif';
+    ctx.fillText(`다음: ${STAGES[stageIdx+1].name}`,W/2,H/2+50);
+  }
+  if(Math.sin(time*0.05)>0){
+    ctx.fillStyle='#f1c40f';ctx.font='bold 16px sans-serif';
+    ctx.fillText('탭하여 다음 →',W/2,H/2+85);
+  }
+}
+
+function drawGameOver(){
+  ctx.fillStyle='rgba(0,0,0,0.75)';ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='rgba(0,0,0,0.4)';
+  ctx.beginPath();ctx.roundRect(W/2-120,H/2-70,240,160,16);ctx.fill();
+  ctx.fillStyle='#e74c3c';ctx.font='bold 26px sans-serif';ctx.textAlign='center';
+  ctx.fillText('GAME OVER',W/2,H/2-30);
+  ctx.fillStyle='#fff';ctx.font='16px sans-serif';
+  ctx.fillText(`점수: ${score}`,W/2,H/2+5);
+  ctx.fillStyle='#aaa';ctx.font='12px sans-serif';
+  ctx.fillText(`${stageIdx+1}R ${stage.name}에서 패배`,W/2,H/2+30);
+  if(Math.sin(time*0.05)>0){
+    ctx.fillStyle='#f1c40f';ctx.font='bold 16px sans-serif';
+    ctx.fillText('탭하여 재도전',W/2,H/2+65);
+  }
+}
+
+function drawGameWin(){
+  ctx.fillStyle='rgba(0,0,0,0.8)';ctx.fillRect(0,0,W,H);
+  for(let i=0;i<25;i++){
+    ctx.fillStyle=`rgba(255,${200+i*2},0,${0.3+Math.sin(time*0.05+i)*0.2})`;
+    ctx.beginPath();ctx.arc((i*73.7+time*0.5)%W,(i*53.3+time*0.3)%H,1.5+Math.sin(time*0.03+i),0,Math.PI*2);ctx.fill();
+  }
+  ctx.fillStyle='rgba(0,0,0,0.4)';
+  ctx.beginPath();ctx.roundRect(W/2-150,H/2-120,300,260,20);ctx.fill();
+  ctx.font=`${48+Math.sin(time*0.05)*3}px sans-serif`;ctx.textAlign='center';
+  ctx.fillText('🏆',W/2,H/2-65+Math.sin(time*0.04)*5);
+  const fl=Math.sin(time*0.08);
+  ctx.fillStyle=fl>0?'#f1c40f':'#ff6600';ctx.font='bold 22px sans-serif';
+  ctx.fillText('전 스테이지 클리어!',W/2,H/2-20);
+  ctx.fillStyle='#fff';ctx.font='bold 16px sans-serif';
+  ctx.fillText('부산 아이파크 우승!',W/2,H/2+10);
+  ctx.fillStyle='#ccc';ctx.font='13px sans-serif';
+  ctx.fillText(`최종 점수: ${score}  |  라이프: ${lives}`,W/2,H/2+40);
+  ctx.fillStyle='#e74c3c';ctx.font='bold 13px sans-serif';
+  ctx.fillText('사나이 자존심 부산에 걸었다!',W/2,H/2+70);
+  ctx.fillStyle='#ffaa55';ctx.font='11px sans-serif';
+  ctx.fillText('대구FC·수원FC·수원삼성을 모두 격파!',W/2,H/2+95);
+  if(Math.sin(time*0.05)>0){
+    ctx.fillStyle='#f1c40f';ctx.font='bold 16px sans-serif';
+    ctx.fillText('탭하여 재도전',W/2,H/2+125);
+  }
+}
+
+// ========== 렌더 ==========
+function render(){
+  ctx.save();ctx.translate(screenShakeX,screenShakeY);
+  if(state==='ready'){drawStartScreen();ctx.restore();return;}
+  drawBackground();
+  for(const p of particles){ctx.globalAlpha=p.life/p.maxLife;ctx.fillStyle=p.color;ctx.beginPath();ctx.arc(p.x,p.y,p.size,0,Math.PI*2);ctx.fill();}
+  ctx.globalAlpha=1;
+  for(const br of bricks) drawBrick(br);
+  for(const b of balls) drawBall(b);
+  drawPaddleCharacter();
+  drawUI();
+  if(state==='stageClear') drawStageClear();
+  else if(state==='gameOver') drawGameOver();
+  else if(state==='gameWin') drawGameWin();
+  ctx.restore();
+}
+
+let lastFrameTime=0;const FRAME_INTERVAL=1000/60;let accumulator=0;
+function gameLoop(ts){
+  if(!lastFrameTime)lastFrameTime=ts;
+  accumulator+=ts-lastFrameTime;lastFrameTime=ts;
+  let steps=0;
+  while(accumulator>=FRAME_INTERVAL&&steps<3){update();accumulator-=FRAME_INTERVAL;steps++;}
+  render();requestAnimationFrame(gameLoop);
+}
+requestAnimationFrame(gameLoop);
+</script>
+</body>
+</html>

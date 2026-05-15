@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>진짜같은 가짜팬 박주석은 못말려</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(135deg, #0a3d0a 0%, #1a5c1a 50%, #0d4d0d 100%);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Segoe UI', sans-serif;
+    padding: 20px;
+    color: #fff;
+  }
+  .container {
+    max-width: 400px;
+    width: 100%;
+  }
+  .title-box {
+    text-align: center;
+    margin-bottom: 30px;
+  }
+  .title-sub {
+    color: #e74c3c;
+    font-size: 14px;
+    font-weight: bold;
+    margin-bottom: 4px;
+  }
+  .title-main {
+    font-size: 24px;
+    font-weight: bold;
+    text-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  }
+  .title-emoji {
+    font-size: 32px;
+    margin: 10px 0;
+  }
+  .version-card {
+    background: rgba(0,0,0,0.4);
+    border-radius: 16px;
+    padding: 20px;
+    margin-bottom: 16px;
+    text-decoration: none;
+    display: block;
+    color: #fff;
+    border: 2px solid rgba(255,255,255,0.1);
+    transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+    cursor: pointer;
+  }
+  .version-card:hover, .version-card:active {
+    transform: scale(1.02);
+    border-color: #f1c40f;
+    box-shadow: 0 4px 20px rgba(241,196,15,0.2);
+  }
+  .version-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  .version-badge {
+    background: #e74c3c;
+    color: #fff;
+    font-size: 11px;
+    font-weight: bold;
+    padding: 3px 10px;
+    border-radius: 12px;
+  }
+  .version-badge.v2 {
+    background: #f1c40f;
+    color: #222;
+  }
+  .version-name {
+    font-size: 17px;
+    font-weight: bold;
+  }
+  .version-desc {
+    color: #bbb;
+    font-size: 12px;
+    line-height: 1.6;
+    margin-bottom: 10px;
+  }
+  .version-tags {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .tag {
+    background: rgba(255,255,255,0.1);
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 8px;
+    color: #ddd;
+  }
+  .play-btn {
+    display: inline-block;
+    background: #f1c40f;
+    color: #222;
+    font-weight: bold;
+    font-size: 14px;
+    padding: 8px 24px;
+    border-radius: 20px;
+    text-decoration: none;
+    margin-top: 6px;
+  }
+  .footer {
+    text-align: center;
+    color: #555;
+    font-size: 10px;
+    margin-top: 24px;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="title-box">
+    <div class="title-sub">진짜같은 가짜팬</div>
+    <div class="title-main">박주석은 못말려</div>
+    <div class="title-emoji">⚽🏟️</div>
+  </div>
+
+  <a class="version-card" href="v3.html">
+    <div class="version-header">
+      <span class="version-badge" style="background:#0056A6">V3 NEW</span>
+      <span class="version-name">벽돌깨기 에디션</span>
+    </div>
+    <div class="version-desc">
+      대구FC → 수원FC → 수원삼성 3스테이지 벽돌깨기!<br>
+      각 팀 엠블럼 벽돌을 부수고 승리하라.<br>
+      스테이지마다 난이도 상승. 라이프 3개로 도전!
+    </div>
+    <div class="version-tags">
+      <span class="tag">벽돌깨기</span>
+      <span class="tag">3스테이지</span>
+      <span class="tag">팀 엠블럼</span>
+      <span class="tag">멀티볼</span>
+    </div>
+    <div style="text-align:center; margin-top:12px;">
+      <span class="play-btn">PLAY →</span>
+    </div>
+  </a>
+
+  <a class="version-card" href="v2.html">
+    <div class="version-header">
+      <span class="version-badge v2">V2</span>
+      <span class="version-name">K리그2 승격 에디션</span>
+    </div>
+    <div class="version-desc">
+      10초 경기 × 10라운드! 축구공 맞으면 실점, 황금공 먹으면 득점.<br>
+      10경기 전승으로 부산 아이파크를 K리그1에 승격시켜라!<br>
+      후반전 상대팀 반격 주의. 경기마다 난이도 상승.
+    </div>
+    <div class="version-tags">
+      <span class="tag">10초 경기</span>
+      <span class="tag">황금공 득점</span>
+      <span class="tag">승격 엔딩</span>
+      <span class="tag">전광판</span>
+    </div>
+    <div style="text-align:center; margin-top:12px;">
+      <span class="play-btn">PLAY →</span>
+    </div>
+  </a>
+
+  <a class="version-card" href="v1.html">
+    <div class="version-header">
+      <span class="version-badge">V1</span>
+      <span class="version-name">축구공 피하기 클래식</span>
+    </div>
+    <div class="version-desc">
+      끝없이 쏟아지는 축구공을 피하며 생존하라!<br>
+      미끄러운 바닥, 불공, 폭격 경고, 아이템까지.<br>
+      최고 점수에 도전하는 무한 서바이벌 모드.
+    </div>
+    <div class="version-tags">
+      <span class="tag">무한 서바이벌</span>
+      <span class="tag">불공</span>
+      <span class="tag">아이템</span>
+      <span class="tag">콤보</span>
+    </div>
+    <div style="text-align:center; margin-top:12px;">
+      <span class="play-btn">PLAY →</span>
+    </div>
+  </a>
+
+  <div class="footer">
+    부산 아이파크 화이팅! 🔴⚪ | 배댈 꺼져!
+  </div>
+</div>
+</body>
+</html>
